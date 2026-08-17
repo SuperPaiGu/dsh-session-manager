@@ -382,7 +382,7 @@ window.__ModuleLoader__.load({
                 rows.map((s) => React.createElement(SessionRow, {
                   key: s.id, s, currentId: list.current, now, batchMode,
                   selected: selected.has(s.id), onToggle: toggleSelect,
-                  onOpen: props.open || ctx.sessions.open,
+                  onOpen: (id) => { if (typeof props.open === 'function') props.open(id); else ctx.sessions.open(id) },
                   onMenu: (id, e) => onMenuOpen('session', id, e), t,
                 })),
                 g.sessions.length > 5 && !open && React.createElement('div', {
