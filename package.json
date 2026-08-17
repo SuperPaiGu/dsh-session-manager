@@ -1,0 +1,26 @@
+{
+  "name": "dsh-session-manager",
+  "version": "0.1.0",
+  "description": "DSH 侧栏批量管理会话：工作区菜单可批量多选删除，会话菜单可直接删除（进系统回收站），无需归档",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "license": "MIT"
+}

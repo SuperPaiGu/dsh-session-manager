@@ -1,0 +1,7 @@
+# dsh-session-manager bundle layer: one host row serving the
+# /session-manager/* endpoint. The package's dsh.client declaration
+# (platform: web) hands the Web GUI the sidebar manager bundle. Installed via
+# `dsh plugin add`. The client shadows the shell's sidebar.workspaces region.
+- insert:
+    - id: session-manager
+      name: dsh-session-manager
