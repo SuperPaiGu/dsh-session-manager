@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-manager",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "DSH 批量管理会话（纯增量）：侧栏底部批量面板，每行可单删或多选批量删除（进系统回收站），删除后立即消失",
   "type": "module",
   "main": "index.js",
