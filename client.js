@@ -1,5 +1,5 @@
 /**
- * dsh-session-manager, browser half — additive-only build (v0.2.7).
+ * dsh-session-manager, browser half — additive-only build (v0.2.8).
  *
  * Does NOT replace the official sidebar. It adds one piece through DSH's own
  * additive slot, so every official feature is preserved:
@@ -12,11 +12,12 @@
  * dimmed and cannot be selected or deleted (host skips them anyway).
  *
  * After a successful delete the session list is refreshed
- * (ctx.sessions.refresh) AND the deleted id is added to a local `removed`
- * Set that filters it out of the panel immediately. The refresh covers
- * cold/persisted sessions; the local filter covers sessions that are still
- * attached to host memory (ctx.sessions.list() always includes them until
- * their lifecycle ends), so deletion appears instant without a DSH restart.
+ * (ctx.sessions.refresh) AND the deleted id is added to an apply-level
+ * `removedStore` that filters it out of the panel immediately and survives
+ * panel close/reopen and occupant remounts. The refresh covers cold/persisted
+ * sessions; the local filter covers sessions that are still attached to host
+ * memory (ctx.sessions.list() always includes them until their lifecycle
+ * ends), so deletion appears instant without a DSH restart.
  *
  * Deletion POSTs to the host `/session-manager/delete` endpoint, which recycles
  * the session folders into the OS Recycle Bin and skips running sessions.
@@ -96,10 +97,11 @@ window.__ModuleLoader__.load({
 
     /**
      * ① 侧栏底部：批量管理会话按钮。
-     * 打开状态放在外部 store（factory 闭包内），用 useSyncExternalStore 订阅：
-     * 即使 occupant 因会话列表刷新被重挂，面板打开状态也不丢。
+     * 打开状态 + 已删除集合都放在外部 store（factory 闭包内），用
+     * useSyncExternalStore 订阅：即使 occupant 因会话列表刷新被重挂，
+     * 面板打开状态和已删过滤也不丢。
      */
-    function createFooterButton(batchStore, onRefresh) {
+    function createFooterButton(batchStore, removedStore, onRefresh) {
       return function FooterButton(props) {
         const open = React.useSyncExternalStore(batchStore.subscribe, batchStore.getSnapshot)
         return React.createElement(React.Fragment, null,
@@ -110,7 +112,7 @@ window.__ModuleLoader__.load({
             React.createElement(IconBatch),
             props.wide && React.createElement('span', { className: 'wsm-lbl' }, '批量管理会话'),
           ),
-          open && React.createElement(BatchPanel, { ...props, onClose: () => batchStore.set(false), onRefresh }),
+          open && React.createElement(BatchPanel, { ...props, onClose: () => batchStore.set(false), onRefresh, removedStore }),
         )
       }
     }
@@ -125,8 +127,9 @@ window.__ModuleLoader__.load({
       const [confirm, setConfirm] = React.useState(false)
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(null)
-      // 本地已删除集合：删除成功的会话立即从面板消失（不等 Host 内存生命周期）
-      const [removed, setRemoved] = React.useState(new Set())
+      // 已删除集合存于 apply 级 store：删除成功的会话立即从面板消失，
+      // 且关闭面板再打开也不会重新出现（不等 Host 内存生命周期）。
+      const removed = React.useSyncExternalStore(props.removedStore.subscribe, props.removedStore.getSnapshot)
 
       // 全部可见会话（工作区成员 + 未分组），最新在前
       const sessions = React.useMemo(() => {
@@ -155,11 +158,7 @@ window.__ModuleLoader__.load({
           const deleted = new Set(results.filter((r) => r.status === 'deleted').map((r) => r.id))
           const skipped = results.filter((r) => r.status !== 'deleted')
           setSelected((prev) => new Set([...prev].filter((id) => !deleted.has(id))))
-          setRemoved((prev) => {
-            const n = new Set(prev)
-            for (const id of deleted) n.add(id)
-            return n
-          })
+          for (const id of deleted) props.removedStore.add(id)
           setConfirm(false)
           setBusy(false)
           if (deleted.size > 0 && typeof onRefresh === 'function') {
@@ -194,7 +193,7 @@ window.__ModuleLoader__.load({
           }
           setBusy(false)
           setRowDelete(null)
-          setRemoved((prev) => new Set(prev).add(rowDelete.id))
+          props.removedStore.add(rowDelete.id)
           if (typeof onRefresh === 'function') {
             onRefresh()
           }
@@ -269,7 +268,7 @@ window.__ModuleLoader__.load({
         document.head.append(style)
         ctx.effect(() => () => style.remove(), 'session-manager: styles')
 
-        // 批量面板打开状态存于 apply 级 store：occupant 重挂不丢失。
+        // 批量面板打开状态 + 已删除集合存于 apply 级 store：occupant 重挂不丢失。
         const batchStore = (() => {
           let open = false
           const listeners = new Set()
@@ -279,6 +278,21 @@ window.__ModuleLoader__.load({
             set: (v) => { open = v; for (const fn of [...listeners]) fn() },
           }
         })()
+        const removedStore = (() => {
+          let removed = new Set()
+          const listeners = new Set()
+          return {
+            getSnapshot: () => removed,
+            subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn) },
+            add: (id) => {
+              if (removed.has(id)) return
+              const n = new Set(removed)
+              n.add(id)
+              removed = n
+              for (const fn of [...listeners]) fn()
+            },
+          }
+        })()
 
         // 侧栏底部「批量管理会话」(footer.action, list/root)。删除统一在
         // 批量面板里进行（每行可单删 + 多选批量删）。
@@ -286,7 +300,7 @@ window.__ModuleLoader__.load({
           name: 'sidebar.footer.action',
           id: 'session-manager-batch',
           order: 100,
-        }, createFooterButton(batchStore, () => { void ctx.sessions.refresh() })))
+        }, createFooterButton(batchStore, removedStore, () => { void ctx.sessions.refresh() })))
       },
     }
   },
