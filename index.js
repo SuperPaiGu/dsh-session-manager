@@ -5,6 +5,15 @@
  * directory through `sessionPersistence.locate`, guards the path, and recycles
  * it with `Microsoft.VisualBasic.FileIO` (SendToRecycleBin) — never an
  * irreversible rm. Running sessions are skipped.
+ *
+ * After a successful recycle the session id is also added to the official
+ * registry-global archive set (`workspaceRegistry.archiveSession`). That is the
+ * official mechanism grouping surfaces use to hide a session: the Web client
+ * receives the `host/archived-sessions-changed` frame and removes the row from
+ * the sidebar immediately (persisted), without waiting for the memory-attached
+ * session's lifecycle to end. Archiving never touches logs or workspace
+ * accounting; a session no longer known to persistence may reject the archive,
+ * which is non-fatal — the client list refresh already drops cold rows.
  */
 
 export const name = 'session-manager'
@@ -63,6 +72,15 @@ async function deleteOne(sessionId, headersByString, deps) {
   }
   const outcome = await recycle(shell, dir)
   if (!outcome.ok) return { id: sessionId, status: 'error', message: outcome.message }
+  // 删除成功后把 id 加入官方归档集合：侧栏（分组/平铺/搜索）立即隐藏该行。
+  // 失败不致命（冷会话可能已不在 persistence 里），客户端 refresh 会兜底。
+  if (deps.workspaceRegistry !== undefined) {
+    try {
+      await deps.workspaceRegistry.archiveSession(sessionId)
+    } catch {
+      // 非致命：冷会话可能已不在 persistence 中，客户端 refresh 会兜底。
+    }
+  }
   return { id: sessionId, status: 'deleted' }
 }
 
@@ -94,6 +112,7 @@ export function apply(ctx) {
     agents: ctx.get('agents'),
     persistence: ctx.get('sessionPersistence'),
     shell: ctx.get('shell'),
+    workspaceRegistry: ctx.get('workspaceRegistry'),
   }
 
   ctx.effect(() => ctx.webServer.register({
