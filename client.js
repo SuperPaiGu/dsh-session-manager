@@ -1,13 +1,15 @@
 /**
- * dsh-session-manager, browser half — additive-only build (v0.2.3).
+ * dsh-session-manager, browser half — additive-only build (v0.2.4).
  *
- * Does NOT replace the official sidebar. It adds pieces through DSH's own
- * additive slots, so every official feature is preserved:
- *   - conversation.session.header.actions : a「删除会话」button per open
- *     session header (deletes the current session into the Recycle Bin).
- *   - sidebar.footer.action               : a「批量管理会话」button at the
- *     sidebar foot; the batch panel renders as a child component of the
- *     button (independent hooks, no React #310).
+ * Does NOT replace the official sidebar. It adds one piece through DSH's own
+ * additive slot, so every official feature is preserved:
+ *   - sidebar.footer.action : a「批量管理会话」button at the sidebar foot;
+ *     the batch panel renders inside the button component itself
+ *     (self-contained, independent hooks — no React #310).
+ *
+ * Deletion is unified in the batch panel: every row has its own「删除」button
+ * (single delete) plus multi-select +「删除选中」. Running sessions are shown
+ * dimmed and cannot be selected or deleted (host skips them anyway).
  *
  * Deletion POSTs to the host `/session-manager/delete` endpoint, which recycles
  * the session folders into the OS Recycle Bin and skips running sessions.
@@ -48,6 +50,9 @@ window.__ModuleLoader__.load({
 .wsm-panel-bar{display:flex;align-items:center;gap:8px;border-top:1px solid var(--dsw-alias-border-l1);padding-top:10px;margin-top:10px}
 .wsm-panel-bar span{flex:1;font-size:12.5px;color:var(--dsw-alias-label-secondary)}
 .wsm-error{color:var(--dsw-alias-state-error-primary);font-size:12px;padding:8px 4px}
+.wsm-dim{opacity:.45;pointer-events:none}
+.wsm-pitem-del{background:none;border:none;color:var(--dsw-alias-label-secondary);padding:3px 5px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;flex:none}
+.wsm-pitem-del:hover{background:var(--dsw-alias-state-error-primary);color:#fff}
 `
 
     const svg = (d, size) => React.createElement('svg', {
@@ -82,55 +87,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** ① 会话头部动作：「删除会话」 */
-    function DeleteHeaderButton(props) {
-      const [confirm, setConfirm] = React.useState(false)
-      const [busy, setBusy] = React.useState(false)
-      const [error, setError] = React.useState(null)
-      const sessionId = props.sessionId
-      const snapshot = props.useSession((s) => s)
-      const title = (snapshot && snapshot.session && snapshot.session.title) || sessionId
-
-      const doDelete = async () => {
-        if (busy) return
-        setBusy(true); setError(null)
-        try {
-          const results = await apiDelete([sessionId])
-          const deleted = results.filter((r) => r.status === 'deleted')
-          if (deleted.length === 0) {
-            const first = results[0]
-            const reason = first && (first.reason || first.message)
-            let why = reason === 'running' ? '该会话正在运行，已被跳过'
-              : reason === 'missing' ? '该会话不存在（可能已删除）'
-                : (reason || '未知原因')
-            setError('未删除：' + why)
-            setBusy(false)
-            return
-          }
-          setBusy(false)
-          setConfirm(false)
-        } catch (e) {
-          setError(e instanceof Error ? e.message : String(e))
-          setBusy(false)
-        }
-      }
-
-      return React.createElement(React.Fragment, null,
-        React.createElement('button', {
-          type: 'button', className: 'wsm-ibtn', title: '删除会话',
-          onClick: () => { setConfirm(true); setError(null) },
-        }, React.createElement(IconTrash)),
-        confirm && React.createElement(ConfirmDialog, {
-          title: '删除会话', busy,
-          body: '确定要删除会话“' + (title || sessionId) + '”吗？其日志将移入系统回收站（可从回收站恢复）。' + (error ? '\n' + error : ''),
-          onCancel: () => { if (!busy) setConfirm(false) },
-          onConfirm: doDelete,
-          confirmLabel: '确定',
-        }),
-      )
-    }
-
-    /** ② 侧栏底部：批量管理会话按钮（独立组件，面板作为子组件元素渲染） */
+    /** ① 侧栏底部：批量管理会话按钮（独立组件，面板作为子组件元素渲染） */
     function FooterButton(props) {
       const [open, setOpen] = React.useState(false)
       return React.createElement(React.Fragment, null,
@@ -145,7 +102,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** ③ 批量管理面板（独立组件，hooks 恒定，避免 React #310） */
+    /** ② 批量管理面板（独立组件，hooks 恒定，避免 React #310） */
     function BatchPanel(props) {
       const list = props.useSessions((s) => s)
       const workspaces = props.useWorkspaces((s) => s.items)
@@ -193,15 +150,49 @@ window.__ModuleLoader__.load({
         }
       }
 
+      // 单行删除：确认后删一个会话
+      const [rowDelete, setRowDelete] = React.useState(null)
+      const doDeleteRow = async () => {
+        if (busy || rowDelete === null) return
+        setBusy(true); setError(null)
+        try {
+          const results = await apiDelete([rowDelete.id])
+          const deleted = results.filter((r) => r.status === 'deleted')
+          if (deleted.length === 0) {
+            const first = results[0]
+            const reason = first && (first.reason || first.message)
+            let why = reason === 'running' ? '该会话正在运行，已被跳过'
+              : reason === 'missing' ? '该会话不存在（可能已删除）'
+                : (reason || '未知原因')
+            setError('未删除：' + why)
+            setBusy(false)
+            return
+          }
+          setBusy(false)
+          setRowDelete(null)
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+          setBusy(false)
+        }
+      }
+
       const rows = sessions.map((s) =>
-        React.createElement('div', { key: s.id, className: 'wsm-pitem' },
+        React.createElement('div', {
+          key: s.id,
+          className: 'wsm-pitem' + (s.running ? ' wsm-dim' : ''),
+        },
           React.createElement('input', {
             type: 'checkbox', checked: selected.has(s.id),
+            disabled: s.running === true,
             onChange: () => toggle(s.id),
           }),
           React.createElement('span', { className: 'wsm-pitem-title' }, s.title || s.id),
           React.createElement('span', { className: 'wsm-pitem-meta' },
-            s.running ? '进行中' : (s.completed === true ? '已完成' : '空闲')),
+            s.running ? '进行中（不可删除）' : (s.completed === true ? '已完成' : '空闲')),
+          !s.running && React.createElement('button', {
+            type: 'button', className: 'wsm-pitem-del', title: '删除',
+            onClick: () => { setError(null); setRowDelete({ id: s.id, title: s.title || s.id }) },
+          }, React.createElement(IconTrash)),
         ))
 
       return React.createElement('div', { className: 'wsm-overlay', onClick: busy ? undefined : onClose },
@@ -230,6 +221,13 @@ window.__ModuleLoader__.load({
             onConfirm: doDeleteSelected,
             confirmLabel: '确定',
           }),
+          rowDelete !== null && React.createElement(ConfirmDialog, {
+            title: '删除会话', busy,
+            body: '确定要删除会话“' + rowDelete.title + '”吗？其日志将移入系统回收站（可从回收站恢复）。',
+            onCancel: () => { if (!busy) setRowDelete(null) },
+            onConfirm: doDeleteRow,
+            confirmLabel: '确定',
+          }),
         ),
       )
     }
@@ -243,15 +241,9 @@ window.__ModuleLoader__.load({
         document.head.append(style)
         ctx.effect(() => () => style.remove(), 'session-manager: styles')
 
-        // ① 会话头部「删除会话」(header.actions, list/session)
-        ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
-          name: 'conversation.session.header.actions',
-          id: 'session-manager-delete',
-          order: 100,
-        }, DeleteHeaderButton))
-
-        // ② 侧栏底部「批量管理会话」(footer.action, list/root) —— 独立组件，
-        // 批量面板作为其子组件按 open 渲染，无 hooks 顺序问题。
+        // 侧栏底部「批量管理会话」(footer.action, list/root) —— 独立组件，
+        // 批量面板作为其子组件按 open 渲染，无 hooks 顺序问题。删除统一在
+        // 批量面板里进行（每行可单删 + 多选批量删），不再占用会话顶栏。
         ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
           name: 'sidebar.footer.action',
           id: 'session-manager-batch',
