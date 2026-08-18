@@ -123,7 +123,7 @@ window.__ModuleLoader__.load({
     const IconMore = () => svg('M2 8a1.6 1.6 0 1 1 3.2 0A1.6 1.6 0 0 1 2 8Zm4.4 0a1.6 1.6 0 1 1 3.2 0 1.6 1.6 0 0 1-3.2 0Zm4.4 0a1.6 1.6 0 1 1 3.2 0 1.6 1.6 0 0 1-3.2 0Z')
     const IconFolder = () => svg('M1.5 3.5A1.5 1.5 0 0 1 3 2h3l1.5 2H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5v-9Z')
     const IconArrow = () => svg('M5.5 3l5 5-5 5V3Z')
-    const IconPlus = () => svg('M8 3v10M3 8h10')
+    const IconPlus = () => svg('M7 3h2v4h4v2H9v4H7V9H3V7h4V3Z')
     const IconTrash = () => svg('M5.5 3.5h5M6.8 2.4h2.4v1.1H6.8V2.4ZM4 4.6h8l-.8 8.6a1 1 0 0 1-1 .9H5.8a1 1 0 0 1-1-.9L4 4.6Z')
     const IconEdit = () => svg('M11.4 1.6l3 3L6 13H3v-3l8.4-8.4Z')
     const IconBranch = () => svg('M4 2.5v3M4 5.5a3 3 0 0 0 3 3h2a3 3 0 0 1 3 3v1.5M4 5.5v8M12 5.5v3')
