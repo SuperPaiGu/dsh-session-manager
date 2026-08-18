@@ -1,5 +1,5 @@
 /**
- * dsh-session-manager, browser half — additive-only build (v0.2.0).
+ * dsh-session-manager, browser half — additive-only build (v0.2.1).
  *
  * Does NOT replace the official sidebar. It adds three small pieces through
  * DSH's own additive slots, so every official feature is preserved:
@@ -9,6 +9,10 @@
  *     sidebar foot that opens the batch panel.
  *   - shell.overlay                        : the batch-manage panel (checkbox
  *     list of every session, select-all, delete-selected).
+ *
+ * The batch panel opens via a browser-level event: the footer button
+ * dispatches `wsm:open-batch` and the shell.overlay occupant listens, keeping
+ * the two additive entries independent of each other's state.
  *
  * Deletion POSTs to the host `/session-manager/delete` endpoint, which recycles
  * the session folders into the OS Recycle Bin and skips running sessions.
@@ -239,10 +243,10 @@ window.__ModuleLoader__.load({
         document.head.append(style)
         ctx.effect(() => () => style.remove(), 'session-manager: styles')
 
-        // 批量面板打开状态：footer 按钮与 overlay 面板共享。
-        const panelState = { open: false, listeners: new Set() }
-        const subscribePanel = (fn) => { panelState.listeners.add(fn); return () => panelState.listeners.delete(fn) }
-        const setPanelOpen = (open) => { panelState.open = open; for (const fn of [...panelState.listeners]) fn() }
+        // 批量面板打开通过一个浏览器级事件广播：footer 按钮派发，
+        // shell.overlay 组件监听。两个卡片入口分属不同 slot，用事件总线
+        // 最可靠（不依赖组件间状态传递或挂载时序）。
+        const OPEN_BATCH_EVENT = 'wsm:open-batch'
 
         // ① 会话头部「删除会话」(header.actions, list/session)
         ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
@@ -256,18 +260,24 @@ window.__ModuleLoader__.load({
           name: 'sidebar.footer.action',
           id: 'session-manager-batch',
           order: 100,
-        }, createFooterButton(() => { setPanelOpen(true) })))
+        }, createFooterButton(() => { document.dispatchEvent(new Event(OPEN_BATCH_EVENT)) })))
 
-        // ③ 批量管理浮层 (shell.overlay, list/root) —— 受控渲染：仅当 open 时输出面板
+        // ③ 批量管理浮层 (shell.overlay, list/root) —— 组件始终渲染为一个
+        // Fragment（hooks 恒执行、订阅恒生效），面板本身按 open 显隐。
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
           id: 'session-manager-batch-panel',
           order: 100,
         }, (props) => {
-          const [open, setOpen] = React.useState(panelState.open)
-          React.useEffect(() => subscribePanel((v) => setOpen(v)), [])
-          if (!open) return null
-          return createBatchPanel(props, () => { setPanelOpen(false) })
+          const [open, setOpen] = React.useState(false)
+          React.useEffect(() => {
+            const onOpen = () => setOpen(true)
+            document.addEventListener(OPEN_BATCH_EVENT, onOpen)
+            return () => document.removeEventListener(OPEN_BATCH_EVENT, onOpen)
+          }, [])
+          return React.createElement(React.Fragment, null,
+            open && createBatchPanel(props, () => setOpen(false)),
+          )
         }))
       },
     }
