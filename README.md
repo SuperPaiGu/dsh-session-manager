@@ -9,8 +9,8 @@
 
 ## 功能
 
-- **会话头删除**：打开任意会话，标题栏右侧出现垃圾桶图标，确认后删除该会话（进回收站）
-- **批量管理面板**：侧栏底部「批量管理会话」按钮 → 浮层面板列出全部会话（含未分组），支持：
+- **会话头删除**：打开任意会话，标题栏右侧出现垃圾桶图标，确认后删除该会话（进回收站）。正在运行的会话会被跳过并提示。
+- **批量管理面板**：侧栏底部「批量管理会话」按钮 → 面板列出全部会话（含未分组），支持：
   - 每个会话一行 + 勾选框
   - 全选 / 清空
   - 已选计数
@@ -28,10 +28,10 @@
 
 ### 两步装好
 
-**第 1 步**：到本仓库的 Release 页面下载 `dsh-session-manager-0.2.1.tgz`，然后在终端执行：
+**第 1 步**：到本仓库的 Release 页面下载 `dsh-session-manager-0.2.2.tgz`，然后在终端执行：
 
 ```sh
-dsh plugin --profile web add ./dsh-session-manager-0.2.1.tgz
+dsh plugin --profile web add ./dsh-session-manager-0.2.2.tgz
 ```
 
 **第 2 步**：重启 DSH Web 服务（先停止当前的 `dsh web`，再重新启动）。
@@ -58,7 +58,7 @@ dsh plugin --profile web remove dsh-session-manager
 
 - **删除是回收站删除**：会话目录被移进系统回收站，可以从回收站恢复。它不是立即永久删除。
 - **正在运行的会话会跳过**：删除会检查会话是否处于运行中，运行中一律跳过并在界面提示。
-- **纯增量**：本插件不遮蔽、不替换任何官方区域，只通过 `conversation.session.header.actions`、`sidebar.footer.action`、`shell.overlay` 三个官方加性插槽叠加功能。
+- **纯增量**：本插件不遮蔽、不替换任何官方区域，只通过 `conversation.session.header.actions`、`sidebar.footer.action` 两个官方加性插槽叠加功能（批量面板内嵌在按钮组件里）。
 
 ## 目录结构
 
