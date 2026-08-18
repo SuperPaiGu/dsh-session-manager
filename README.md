@@ -28,10 +28,10 @@
 
 ### 两步装好
 
-**第 1 步**：到本仓库的 Release 页面下载 `dsh-session-manager-0.2.2.tgz`，然后在终端执行：
+**第 1 步**：到本仓库的 Release 页面下载 `dsh-session-manager-0.2.3.tgz`，然后在终端执行：
 
 ```sh
-dsh plugin --profile web add ./dsh-session-manager-0.2.2.tgz
+dsh plugin --profile web add ./dsh-session-manager-0.2.3.tgz
 ```
 
 **第 2 步**：重启 DSH Web 服务（先停止当前的 `dsh web`，再重新启动）。
@@ -58,7 +58,7 @@ dsh plugin --profile web remove dsh-session-manager
 
 - **删除是回收站删除**：会话目录被移进系统回收站，可以从回收站恢复。它不是立即永久删除。
 - **正在运行的会话会跳过**：删除会检查会话是否处于运行中，运行中一律跳过并在界面提示。
-- **纯增量**：本插件不遮蔽、不替换任何官方区域，只通过 `conversation.session.header.actions`、`sidebar.footer.action` 两个官方加性插槽叠加功能（批量面板内嵌在按钮组件里）。
+- **纯增量**：本插件不遮蔽、不替换任何官方区域，只通过 `conversation.session.header.actions`、`sidebar.footer.action` 两个官方加性插槽叠加功能（批量面板作为按钮组件的子组件渲染）。
 
 ## 目录结构
 
@@ -67,7 +67,7 @@ dsh-session-manager/   组合包根
 ├── package.json        dsh.bundle + dsh.client 声明
 ├── cordis.patch.yml    插件层（id session-manager → dsh-session-manager）
 ├── index.js            Host 插件：/session-manager/delete 端点 + 回收站删除
-├── client.js           Web 客户端 bundle：纯增量（会话头删除 + 侧栏底部批量按钮 + 批量浮层）
+├── client.js           Web 客户端 bundle：纯增量（会话头删除 + 侧栏底部批量按钮 + 批量面板）
 └── README.md
 ```
 
