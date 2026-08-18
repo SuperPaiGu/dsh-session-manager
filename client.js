@@ -1,11 +1,12 @@
 /**
- * dsh-session-manager, browser half — additive-only build (v0.2.4).
+ * dsh-session-manager, browser half — additive-only build (v0.2.5).
  *
  * Does NOT replace the official sidebar. It adds one piece through DSH's own
  * additive slot, so every official feature is preserved:
  *   - sidebar.footer.action : a「批量管理会话」button at the sidebar foot;
- *     the batch panel renders inside the button component itself
- *     (self-contained, independent hooks — no React #310).
+ *     the batch panel renders inside the button component itself. The open
+ *     state lives in an apply-level store (useSyncExternalStore) so the panel
+ *     survives occupant remounts when the session list refreshes.
  *
  * Deletion is unified in the batch panel: every row has its own「删除」button
  * (single delete) plus multi-select +「删除选中」. Running sessions are shown
@@ -87,19 +88,25 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** ① 侧栏底部：批量管理会话按钮（独立组件，面板作为子组件元素渲染） */
-    function FooterButton(props) {
-      const [open, setOpen] = React.useState(false)
-      return React.createElement(React.Fragment, null,
-        React.createElement('button', {
-          type: 'button', className: 'wsm-fbtn', title: '批量管理会话',
-          onClick: () => setOpen(true),
-        },
-          React.createElement(IconBatch),
-          props.wide && React.createElement('span', { className: 'wsm-lbl' }, '批量管理会话'),
-        ),
-        open && React.createElement(BatchPanel, { ...props, onClose: () => setOpen(false) }),
-      )
+    /**
+     * ① 侧栏底部：批量管理会话按钮。
+     * 打开状态放在外部 store（factory 闭包内），用 useSyncExternalStore 订阅：
+     * 即使 occupant 因会话列表刷新被重挂，面板打开状态也不丢。
+     */
+    function createFooterButton(batchStore) {
+      return function FooterButton(props) {
+        const open = React.useSyncExternalStore(batchStore.subscribe, batchStore.getSnapshot)
+        return React.createElement(React.Fragment, null,
+          React.createElement('button', {
+            type: 'button', className: 'wsm-fbtn', title: '批量管理会话',
+            onClick: () => batchStore.set(true),
+          },
+            React.createElement(IconBatch),
+            props.wide && React.createElement('span', { className: 'wsm-lbl' }, '批量管理会话'),
+          ),
+          open && React.createElement(BatchPanel, { ...props, onClose: () => batchStore.set(false) }),
+        )
+      }
     }
 
     /** ② 批量管理面板（独立组件，hooks 恒定，避免 React #310） */
@@ -241,14 +248,24 @@ window.__ModuleLoader__.load({
         document.head.append(style)
         ctx.effect(() => () => style.remove(), 'session-manager: styles')
 
-        // 侧栏底部「批量管理会话」(footer.action, list/root) —— 独立组件，
-        // 批量面板作为其子组件按 open 渲染，无 hooks 顺序问题。删除统一在
-        // 批量面板里进行（每行可单删 + 多选批量删），不再占用会话顶栏。
+        // 批量面板打开状态存于 apply 级 store：occupant 重挂不丢失。
+        const batchStore = (() => {
+          let open = false
+          const listeners = new Set()
+          return {
+            getSnapshot: () => open,
+            subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn) },
+            set: (v) => { open = v; for (const fn of [...listeners]) fn() },
+          }
+        })()
+
+        // 侧栏底部「批量管理会话」(footer.action, list/root)。删除统一在
+        // 批量面板里进行（每行可单删 + 多选批量删）。
         ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
           name: 'sidebar.footer.action',
           id: 'session-manager-batch',
           order: 100,
-        }, FooterButton))
+        }, createFooterButton(batchStore)))
       },
     }
   },
