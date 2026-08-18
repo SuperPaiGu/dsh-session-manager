@@ -46,7 +46,10 @@ async function recycle(shell, dir) {
 /** Delete one persisted session; skip when running / missing / no artifact. */
 async function deleteOne(sessionId, headersByString, deps) {
   const { agents, persistence, shell } = deps
-  if (agents !== undefined && agents.get(sessionId) !== undefined) {
+  // 「正在运行」= 有 live agent 且该 agent 状态为 running。
+  // Web 环境下已打开的会话通常常驻 live agent（idle），所以不能只看 agent 是否存在。
+  const agent = agents !== undefined ? agents.get(sessionId) : undefined
+  if (agent !== undefined && agent.status === 'running') {
     return { id: sessionId, status: 'skipped', reason: 'running' }
   }
   const header = headersByString.get(sessionId)
