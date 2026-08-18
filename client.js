@@ -1,18 +1,22 @@
 /**
- * dsh-session-manager, browser half — additive-only build (v0.2.6).
+ * dsh-session-manager, browser half — additive-only build (v0.2.7).
  *
  * Does NOT replace the official sidebar. It adds one piece through DSH's own
  * additive slot, so every official feature is preserved:
  *   - sidebar.footer.action : a「批量管理会话」button at the sidebar foot;
- *     the batch panel renders inside the button component itself. The open
- *     state lives in an apply-level store (useSyncExternalStore) so the panel
- *     survives occupant remounts when the session list refreshes.
+ *     the batch panel renders inside the button component itself
+ *     (self-contained, independent hooks — no React #310).
  *
  * Deletion is unified in the batch panel: every row has its own「删除」button
  * (single delete) plus multi-select +「删除选中」. Running sessions are shown
- * dimmed and cannot be selected or deleted (host skips them anyway). After a
- * successful delete the session list is refreshed (ctx.sessions.refresh) so
- * the removed session disappears immediately without a DSH restart.
+ * dimmed and cannot be selected or deleted (host skips them anyway).
+ *
+ * After a successful delete the session list is refreshed
+ * (ctx.sessions.refresh) AND the deleted id is added to a local `removed`
+ * Set that filters it out of the panel immediately. The refresh covers
+ * cold/persisted sessions; the local filter covers sessions that are still
+ * attached to host memory (ctx.sessions.list() always includes them until
+ * their lifecycle ends), so deletion appears instant without a DSH restart.
  *
  * Deletion POSTs to the host `/session-manager/delete` endpoint, which recycles
  * the session folders into the OS Recycle Bin and skips running sessions.
@@ -121,15 +125,17 @@ window.__ModuleLoader__.load({
       const [confirm, setConfirm] = React.useState(false)
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(null)
+      // 本地已删除集合：删除成功的会话立即从面板消失（不等 Host 内存生命周期）
+      const [removed, setRemoved] = React.useState(new Set())
 
       // 全部可见会话（工作区成员 + 未分组），最新在前
       const sessions = React.useMemo(() => {
         const arr = list.ids
           .map((id) => list.byId[id])
-          .filter((s) => s !== undefined && s.origin !== 'subagent')
+          .filter((s) => s !== undefined && s.origin !== 'subagent' && !removed.has(s.id))
         arr.sort((a, b) => b.updatedAt - a.updatedAt)
         return arr
-      }, [list])
+      }, [list, removed])
       const allSelected = sessions.length > 0 && sessions.every((s) => selected.has(s.id))
 
       const toggle = (id) => setSelected((prev) => {
@@ -149,6 +155,11 @@ window.__ModuleLoader__.load({
           const deleted = new Set(results.filter((r) => r.status === 'deleted').map((r) => r.id))
           const skipped = results.filter((r) => r.status !== 'deleted')
           setSelected((prev) => new Set([...prev].filter((id) => !deleted.has(id))))
+          setRemoved((prev) => {
+            const n = new Set(prev)
+            for (const id of deleted) n.add(id)
+            return n
+          })
           setConfirm(false)
           setBusy(false)
           if (deleted.size > 0 && typeof onRefresh === 'function') {
@@ -183,6 +194,7 @@ window.__ModuleLoader__.load({
           }
           setBusy(false)
           setRowDelete(null)
+          setRemoved((prev) => new Set(prev).add(rowDelete.id))
           if (typeof onRefresh === 'function') {
             onRefresh()
           }
@@ -269,8 +281,7 @@ window.__ModuleLoader__.load({
         })()
 
         // 侧栏底部「批量管理会话」(footer.action, list/root)。删除统一在
-        // 批量面板里进行（每行可单删 + 多选批量删），删除成功后刷新会话列表，
-        // 让被删会话立即从侧栏消失（无需重启 DSH）。
+        // 批量面板里进行（每行可单删 + 多选批量删）。
         ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
           name: 'sidebar.footer.action',
           id: 'session-manager-batch',
