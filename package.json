@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-manager",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH 侧栏批量管理会话：工作区菜单可批量多选删除，会话菜单可直接删除（进系统回收站），无需归档",
   "type": "module",
   "main": "index.js",
