@@ -15,13 +15,14 @@
   - 已选计数
   - 「删除选中」（进回收站）
   - **运行中的会话置灰，不可勾选、不可删除**（提示"进行中（不可删除）"）
-  - **删除后立即从面板消失**，关闭面板再打开也不会复现，不用重启 DSH Web
+  - **删除后立即消失**：面板里即时移除（关闭再打开也不复现），**官方侧栏同步隐藏**（走官方归档集合，分组/平铺/搜索全部生效，刷新页面也不会回来），不用重启 DSH Web
 - 删除通过 DSH Host 的 `sessionPersistence.locate` 精确定位会话目录，再移入系统回收站；路径带护栏，不会误删 Work 区外的东西
 - 自动生效：装好后每次打开 DSH Web 就有，无需手动激活或审批
 
 > **v0.2.x 起改为纯增量**，不再遮蔽官方侧栏。
 > **v0.2.4**：删除统一收进批量面板（每行单删 + 多选批量），移除了会话顶栏垃圾桶——原单删只能作用于当前打开的（几乎总是运行中的）会话，没有实用价值。
-> **v0.2.8**：删除成功的会话立即从批量面板消失（本地过滤 + 列表刷新），关闭面板再打开也不会复现，无需重启。
+> **v0.2.8**：删除成功的会话立即从批量面板消失（本地过滤 + 列表刷新），关闭面板再打开也不会复现。
+> **v0.2.9**：删除成功后 Host 把会话 id 加入官方归档集合（`workspaceRegistry.archiveSession`），官方侧栏立即隐藏该会话（所有视图模式、刷新后依然隐藏）。
 
 ## 怎么安装（手动安装）
 
@@ -31,10 +32,10 @@
 
 ### 两步装好
 
-**第 1 步**：到本仓库的 Release 页面下载 `dsh-session-manager-0.2.8.tgz`，然后在终端执行：
+**第 1 步**：到本仓库的 Release 页面下载 `dsh-session-manager-0.2.9.tgz`，然后在终端执行：
 
 ```sh
-dsh plugin --profile web add ./dsh-session-manager-0.2.8.tgz
+dsh plugin --profile web add ./dsh-session-manager-0.2.9.tgz
 ```
 
 **第 2 步**：重启 DSH Web 服务（先停止当前的 `dsh web`，再重新启动）。
@@ -59,11 +60,11 @@ dsh plugin --profile web remove dsh-session-manager
 
 ## 注意事项
 
-- **删除后立即从面板消失**：删除成功的会话会在批量面板里立刻移除，关闭面板再打开也不会复现，不用重启 DSH Web。
+- **删除后立即消失**：批量面板里立刻移除（关闭再打开也不复现）；官方侧栏通过归档集合同步隐藏（分组/平铺/搜索全部生效，刷新页面依然隐藏）。不用重启 DSH Web。
 - **删除是回收站删除**：会话目录被移进系统回收站，可以从回收站恢复。它不是立即永久删除。
 - **正在运行的会话不可删**：运行中的会话置灰，勾选框与删除按钮均不可用（Host 端也会保护跳过）。
 - **未持久化的会话**：新建但还没有日志落盘的会话无法删除（Host 报 missing），这类空会话重启后会自然消失。
-- **纯增量**：本插件不遮蔽、不替换任何官方区域，只通过 `sidebar.footer.action` 官方加性插槽叠加功能（批量面板作为按钮组件的子组件渲染）。
+- **纯增量**：本插件不遮蔽、不替换任何官方区域，只通过 `sidebar.footer.action` 官方加性插槽叠加功能（批量面板作为按钮组件的子组件渲染）；侧栏隐藏复用官方 `workspaceRegistry.archiveSession` 归档集合，不新增任何界面。
 
 ## 目录结构
 
@@ -71,7 +72,7 @@ dsh plugin --profile web remove dsh-session-manager
 dsh-session-manager/   组合包根
 ├── package.json        dsh.bundle + dsh.client 声明
 ├── cordis.patch.yml    插件层（id session-manager → dsh-session-manager）
-├── index.js            Host 插件：/session-manager/delete 端点 + 回收站删除
+├── index.js            Host 插件：/session-manager/delete 端点 + 回收站删除 + 归档隐藏
 ├── client.js           Web 客户端 bundle：纯增量（侧栏底部批量按钮 + 批量面板）
 └── README.md
 ```
