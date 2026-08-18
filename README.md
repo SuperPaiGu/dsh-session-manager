@@ -18,7 +18,7 @@
 - 删除通过 DSH Host 的 `sessionPersistence.locate` 精确定位会话目录，再移入系统回收站；路径带护栏，不会误删 Work 区外的东西
 - 自动生效：装好后每次打开 DSH Web 就有，无需手动激活或审批
 
-> **v0.2.0 起改为纯增量**，不再遮蔽官方侧栏。
+> **v0.2.x 起改为纯增量**，不再遮蔽官方侧栏。
 
 ## 怎么安装（手动安装）
 
@@ -28,10 +28,10 @@
 
 ### 两步装好
 
-**第 1 步**：到本仓库的 Release 页面下载 `dsh-session-manager-0.2.0.tgz`，然后在终端执行：
+**第 1 步**：到本仓库的 Release 页面下载 `dsh-session-manager-0.2.1.tgz`，然后在终端执行：
 
 ```sh
-dsh plugin --profile web add ./dsh-session-manager-0.2.0.tgz
+dsh plugin --profile web add ./dsh-session-manager-0.2.1.tgz
 ```
 
 **第 2 步**：重启 DSH Web 服务（先停止当前的 `dsh web`，再重新启动）。
