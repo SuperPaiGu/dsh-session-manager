@@ -1,5 +1,5 @@
 /**
- * dsh-session-manager, browser half — additive-only build (v0.2.8).
+ * dsh-session-manager, browser half — additive-only build (v0.2.9).
  *
  * Does NOT replace the official sidebar. It adds one piece through DSH's own
  * additive slot, so every official feature is preserved:
@@ -14,10 +14,12 @@
  * After a successful delete the session list is refreshed
  * (ctx.sessions.refresh) AND the deleted id is added to an apply-level
  * `removedStore` that filters it out of the panel immediately and survives
- * panel close/reopen and occupant remounts. The refresh covers cold/persisted
- * sessions; the local filter covers sessions that are still attached to host
- * memory (ctx.sessions.list() always includes them until their lifecycle
- * ends), so deletion appears instant without a DSH restart.
+ * panel close/reopen and occupant remounts. The official sidebar clears at
+ * the same time through the host: after recycling the files the host adds the
+ * id to the registry-global archive set (`workspaceRegistry.archiveSession`),
+ * which pushes `host/archived-sessions-changed`; grouping surfaces derive with
+ * that set, so the row disappears from the sidebar in every mode — no restart,
+ * and the hide is persisted (it survives reloads).
  *
  * Deletion POSTs to the host `/session-manager/delete` endpoint, which recycles
  * the session folders into the OS Recycle Bin and skips running sessions.
@@ -96,7 +98,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * ① 侧栏底部：批量管理会话按钮。
+     * ② 侧栏底部：批量管理会话按钮。
      * 打开状态 + 已删除集合都放在外部 store（factory 闭包内），用
      * useSyncExternalStore 订阅：即使 occupant 因会话列表刷新被重挂，
      * 面板打开状态和已删过滤也不丢。
@@ -117,7 +119,7 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** ② 批量管理面板（独立组件，hooks 恒定，避免 React #310） */
+    /** ③ 批量管理面板（独立组件，hooks 恒定，避免 React #310） */
     function BatchPanel(props) {
       const list = props.useSessions((s) => s)
       const workspaces = props.useWorkspaces((s) => s.items)
