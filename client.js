@@ -1,18 +1,13 @@
 /**
- * dsh-session-manager, browser half — additive-only build (v0.2.1).
+ * dsh-session-manager, browser half — additive-only build (v0.2.2).
  *
- * Does NOT replace the official sidebar. It adds three small pieces through
- * DSH's own additive slots, so every official feature is preserved:
+ * Does NOT replace the official sidebar. It adds pieces through DSH's own
+ * additive slots, so every official feature is preserved:
  *   - conversation.session.header.actions : a「删除会话」button per open
  *     session header (deletes the current session into the Recycle Bin).
  *   - sidebar.footer.action               : a「批量管理会话」button at the
- *     sidebar foot that opens the batch panel.
- *   - shell.overlay                        : the batch-manage panel (checkbox
- *     list of every session, select-all, delete-selected).
- *
- * The batch panel opens via a browser-level event: the footer button
- * dispatches `wsm:open-batch` and the shell.overlay occupant listens, keeping
- * the two additive entries independent of each other's state.
+ *     sidebar foot; the batch panel renders inside the button component
+ *     itself (self-contained), so it needs no overlay slot or event bus.
  *
  * Deletion POSTs to the host `/session-manager/delete` endpoint, which recycles
  * the session folders into the OS Recycle Bin and skips running sessions.
@@ -105,7 +100,11 @@ window.__ModuleLoader__.load({
             const deleted = results.filter((r) => r.status === 'deleted')
             if (deleted.length === 0) {
               const first = results[0]
-              setError('删除失败：' + ((first && (first.reason || first.message)) || '未知原因'))
+              const reason = first && (first.reason || first.message)
+              let why = reason === 'running' ? '该会话正在运行，已被跳过'
+                : reason === 'missing' ? '该会话不存在（可能已删除）'
+                  : (reason || '未知原因')
+              setError('未删除：' + why)
               setBusy(false)
               return
             }
@@ -133,20 +132,24 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** ② 侧栏底部：批量管理会话按钮（打开批量面板） */
-    function createFooterButton(onOpenPanel) {
+    /** ② 侧栏底部：批量管理会话按钮（批量面板内嵌在组件里，self-contained） */
+    function createFooterButton() {
       return function FooterButton(props) {
-        return React.createElement('button', {
-          type: 'button', className: 'wsm-fbtn', title: '批量管理会话',
-          onClick: onOpenPanel,
-        },
-          React.createElement(IconBatch),
-          props.wide && React.createElement('span', { className: 'wsm-lbl' }, '批量管理会话'),
-        )
+        const [open, setOpen] = React.useState(false)
+        if (!open) {
+          return React.createElement('button', {
+            type: 'button', className: 'wsm-fbtn', title: '批量管理会话',
+            onClick: () => setOpen(true),
+          },
+            React.createElement(IconBatch),
+            props.wide && React.createElement('span', { className: 'wsm-lbl' }, '批量管理会话'),
+          )
+        }
+        return createBatchPanel(props, () => setOpen(false))
       }
     }
 
-    /** ③ 批量管理面板（shell.overlay） */
+    /** ③ 批量管理面板（渲染在 footer 按钮内部的全屏浮层） */
     function createBatchPanel(props, onClose) {
       const list = props.useSessions((s) => s)
       const workspaces = props.useWorkspaces((s) => s.items)
@@ -243,11 +246,6 @@ window.__ModuleLoader__.load({
         document.head.append(style)
         ctx.effect(() => () => style.remove(), 'session-manager: styles')
 
-        // 批量面板打开通过一个浏览器级事件广播：footer 按钮派发，
-        // shell.overlay 组件监听。两个卡片入口分属不同 slot，用事件总线
-        // 最可靠（不依赖组件间状态传递或挂载时序）。
-        const OPEN_BATCH_EVENT = 'wsm:open-batch'
-
         // ① 会话头部「删除会话」(header.actions, list/session)
         ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
           name: 'conversation.session.header.actions',
@@ -255,30 +253,13 @@ window.__ModuleLoader__.load({
           order: 100,
         }, createDeleteHeaderButton()))
 
-        // ② 侧栏底部「批量管理会话」(footer.action, list/root)
+        // ② 侧栏底部「批量管理会话」(footer.action, list/root) —— 批量面板内嵌在
+        // 按钮组件里，self-contained，不依赖 shell.overlay 或事件总线。
         ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
           name: 'sidebar.footer.action',
           id: 'session-manager-batch',
           order: 100,
-        }, createFooterButton(() => { document.dispatchEvent(new Event(OPEN_BATCH_EVENT)) })))
-
-        // ③ 批量管理浮层 (shell.overlay, list/root) —— 组件始终渲染为一个
-        // Fragment（hooks 恒执行、订阅恒生效），面板本身按 open 显隐。
-        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-          name: 'shell.overlay',
-          id: 'session-manager-batch-panel',
-          order: 100,
-        }, (props) => {
-          const [open, setOpen] = React.useState(false)
-          React.useEffect(() => {
-            const onOpen = () => setOpen(true)
-            document.addEventListener(OPEN_BATCH_EVENT, onOpen)
-            return () => document.removeEventListener(OPEN_BATCH_EVENT, onOpen)
-          }, [])
-          return React.createElement(React.Fragment, null,
-            open && createBatchPanel(props, () => setOpen(false)),
-          )
-        }))
+        }, createFooterButton()))
       },
     }
   },
