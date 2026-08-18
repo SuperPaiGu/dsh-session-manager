@@ -1,5 +1,5 @@
 /**
- * dsh-session-manager, browser half — additive-only build (v0.2.5).
+ * dsh-session-manager, browser half — additive-only build (v0.2.6).
  *
  * Does NOT replace the official sidebar. It adds one piece through DSH's own
  * additive slot, so every official feature is preserved:
@@ -10,7 +10,9 @@
  *
  * Deletion is unified in the batch panel: every row has its own「删除」button
  * (single delete) plus multi-select +「删除选中」. Running sessions are shown
- * dimmed and cannot be selected or deleted (host skips them anyway).
+ * dimmed and cannot be selected or deleted (host skips them anyway). After a
+ * successful delete the session list is refreshed (ctx.sessions.refresh) so
+ * the removed session disappears immediately without a DSH restart.
  *
  * Deletion POSTs to the host `/session-manager/delete` endpoint, which recycles
  * the session folders into the OS Recycle Bin and skips running sessions.
@@ -93,7 +95,7 @@ window.__ModuleLoader__.load({
      * 打开状态放在外部 store（factory 闭包内），用 useSyncExternalStore 订阅：
      * 即使 occupant 因会话列表刷新被重挂，面板打开状态也不丢。
      */
-    function createFooterButton(batchStore) {
+    function createFooterButton(batchStore, onRefresh) {
       return function FooterButton(props) {
         const open = React.useSyncExternalStore(batchStore.subscribe, batchStore.getSnapshot)
         return React.createElement(React.Fragment, null,
@@ -104,7 +106,7 @@ window.__ModuleLoader__.load({
             React.createElement(IconBatch),
             props.wide && React.createElement('span', { className: 'wsm-lbl' }, '批量管理会话'),
           ),
-          open && React.createElement(BatchPanel, { ...props, onClose: () => batchStore.set(false) }),
+          open && React.createElement(BatchPanel, { ...props, onClose: () => batchStore.set(false), onRefresh }),
         )
       }
     }
@@ -114,6 +116,7 @@ window.__ModuleLoader__.load({
       const list = props.useSessions((s) => s)
       const workspaces = props.useWorkspaces((s) => s.items)
       const onClose = props.onClose
+      const onRefresh = props.onRefresh
       const [selected, setSelected] = React.useState(new Set())
       const [confirm, setConfirm] = React.useState(false)
       const [busy, setBusy] = React.useState(false)
@@ -148,6 +151,9 @@ window.__ModuleLoader__.load({
           setSelected((prev) => new Set([...prev].filter((id) => !deleted.has(id))))
           setConfirm(false)
           setBusy(false)
+          if (deleted.size > 0 && typeof onRefresh === 'function') {
+            onRefresh()
+          }
           if (skipped.length > 0) {
             setError('部分未删除：' + skipped.map((s) => s.reason || s.message || s.status).join('；'))
           }
@@ -177,6 +183,9 @@ window.__ModuleLoader__.load({
           }
           setBusy(false)
           setRowDelete(null)
+          if (typeof onRefresh === 'function') {
+            onRefresh()
+          }
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e))
           setBusy(false)
@@ -260,12 +269,13 @@ window.__ModuleLoader__.load({
         })()
 
         // 侧栏底部「批量管理会话」(footer.action, list/root)。删除统一在
-        // 批量面板里进行（每行可单删 + 多选批量删）。
+        // 批量面板里进行（每行可单删 + 多选批量删），删除成功后刷新会话列表，
+        // 让被删会话立即从侧栏消失（无需重启 DSH）。
         ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
           name: 'sidebar.footer.action',
           id: 'session-manager-batch',
           order: 100,
-        }, createFooterButton(batchStore)))
+        }, createFooterButton(batchStore, () => { void ctx.sessions.refresh() })))
       },
     }
   },
