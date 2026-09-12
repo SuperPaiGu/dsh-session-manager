@@ -1,7 +1,9 @@
 # dsh-session-manager bundle layer: one host row serving the
-# /session-manager/* endpoint. The package's dsh.client declaration
-# (platform: web) hands the Web GUI the sidebar manager bundle. Installed via
-# `dsh plugin add`. The client shadows the shell's sidebar.workspaces region.
+# /session-manager/delete endpoint. The package's dsh.client declaration
+# (platform: web) hands the Web GUI the archive-view bundle, which registers
+# one additive entry into the shipped `conversation.view` slot (id `archive`,
+# order 20) — the 「归档」 tab to the right of 「对话」 and 「轨迹」. No shipped
+# slot is shadowed or replaced. Installed via `dsh plugin add`.
 - insert:
     - id: session-manager
       name: dsh-session-manager
