@@ -163,7 +163,7 @@ dsh-session-manager/   组合包根
 ├── cordis.patch.yml    插件层（id session-manager → dsh-session-manager）
 ├── index.js            Host：/session-manager/{archived,restore}
 ├── client.js           Web 客户端：向 conversation.view 注册「归档」面板
-├── tests/              路径编码只读实证
+├── tests/              路径编码只读实证（encoding-check.mjs）
 └── README.md
 ```
 
