@@ -31,19 +31,28 @@ window.__ModuleLoader__.load({
 
     const CSS = `
 .wsm-panel{display:flex;flex-direction:column;height:100%;min-height:0;font-size:13px;color:var(--dsw-alias-label-primary)}
-.wsm-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1);flex-wrap:wrap}
+/* Content is inset by the same 32px gutter the shipped Chat view uses
+   (.scroll padding), so the panel lines up with the conversation column.
+   The right side needs much more: the shell's column-width drag handle owns
+   the last 40px of the centre column, and its grab zone covers that whole
+   strip at every y, so any interactive control under it turns the pointer into
+   a resize cursor instead of a click. Measured against the live shell, the
+   plain 32px inset left the row and footer controls' rightmost 7px inside that
+   strip. .wsm-list/.wsm-foot carry the controls, so they and their rows keep a
+   right inset that clears the strip; the bar and notices end in text and stay
+   at 32px. On a narrow column the extra inset simply stops mattering. */
+.wsm-gutter{padding-left:32px;padding-right:32px}
+.wsm-list.wsm-gutter{padding-right:132px}
+.wsm-foot.wsm-gutter{padding-right:150px}
+.wsm-bar{display:flex;align-items:center;gap:8px;padding-top:10px;padding-bottom:10px;flex-wrap:wrap}
 .wsm-count{color:var(--dsw-alias-label-secondary);font-size:12.5px}
 .wsm-spacer{flex:1}
-.wsm-seg{display:inline-flex;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;overflow:hidden}
-.wsm-seg button{background:none;border:none;color:var(--dsw-alias-label-secondary);padding:4px 10px;font-size:12.5px;cursor:pointer}
-.wsm-seg button+button{border-left:1px solid var(--dsw-alias-border-l1)}
-.wsm-seg button.on{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .wsm-btn{background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);padding:4px 10px;border-radius:7px;font-size:12.5px;cursor:pointer}
 .wsm-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-3)}
-.wsm-btn:disabled{opacity:.45;cursor:default}
+.wsm-btn:disabled{opacity:.6;cursor:default}
 .wsm-btn.danger{background:none;border-color:var(--dsw-alias-border-l1);color:var(--dsw-alias-label-error,#e5534b)}
-.wsm-list{flex:1;min-height:0;overflow:auto;padding:6px 8px 12px}
-.wsm-row{display:flex;align-items:flex-start;gap:9px;padding:7px 8px;border-radius:8px}
+.wsm-list{flex:1;min-height:0;overflow:auto;padding-top:4px;padding-bottom:12px}
+.wsm-row{display:flex;align-items:flex-start;gap:9px;padding:7px 50px 7px 8px;border-radius:8px}
 .wsm-row:hover{background:var(--dsw-alias-bg-layer-2)}
 .wsm-row input[type=checkbox]{margin-top:3px;flex:none}
 .wsm-main{flex:1;min-width:0}
@@ -52,12 +61,12 @@ window.__ModuleLoader__.load({
 .wsm-tag{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;font-size:10.5px;line-height:16px;vertical-align:1px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-secondary)}
 .wsm-rowbtn{background:none;border:none;color:var(--dsw-alias-label-secondary);padding:3px 6px;border-radius:6px;cursor:pointer;font-size:12px;flex:none}
 .wsm-rowbtn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary)}
-.wsm-rowbtn:disabled{opacity:.4;cursor:default}
+.wsm-rowbtn:disabled{opacity:.55;cursor:default}
 .wsm-rowbtn.danger{color:var(--dsw-alias-label-error,#e5534b)}
-.wsm-empty{padding:28px 16px;text-align:center;color:var(--dsw-alias-label-secondary)}
-.wsm-foot{display:flex;align-items:center;gap:8px;padding:9px 14px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
-.wsm-err{padding:6px 14px;color:var(--dsw-alias-label-error,#e5534b);font-size:12px}
-.wsm-note{padding:6px 14px;color:var(--dsw-alias-label-secondary);font-size:12px;background:var(--dsw-alias-bg-layer-2)}
+.wsm-empty{padding:28px 0;text-align:center;color:var(--dsw-alias-label-secondary);white-space:pre-line}
+.wsm-foot{display:flex;align-items:center;gap:8px;padding-top:9px;padding-bottom:9px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
+.wsm-err{color:var(--dsw-alias-label-error,#e5534b);font-size:12px;padding-top:6px;padding-bottom:6px}
+.wsm-note{color:var(--dsw-alias-label-secondary);font-size:12px;background:var(--dsw-alias-bg-layer-2);padding-top:6px;padding-bottom:6px}
 .wsm-overlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}
 .wsm-modal{width:min(440px,92vw);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px}
 .wsm-modal-title{font-size:14px;font-weight:600;margin-bottom:10px}
@@ -261,7 +270,7 @@ window.__ModuleLoader__.load({
       ))
 
       return React.createElement('div', { className: 'wsm-panel' },
-        React.createElement('div', { className: 'wsm-bar' },
+        React.createElement('div', { className: 'wsm-bar wsm-gutter' },
           React.createElement('span', { className: 'wsm-count' },
             '归档区 ' + rows.length + ' 个' + (hiddenCount > rows.length ? '（共 ' + hiddenCount + ' 条归档记录）' : '')),
           React.createElement('span', { className: 'wsm-spacer' }),
@@ -270,13 +279,13 @@ window.__ModuleLoader__.load({
             onClick: () => setSelected(allSelected ? new Set() : new Set(selectable.map((s) => s.id))),
           }, allSelected ? '取消全选' : '全选'),
         ),
-        error !== null && React.createElement('div', { className: 'wsm-err' }, error),
-        notice !== null && React.createElement('div', { className: 'wsm-note' }, notice),
+        error !== null && React.createElement('div', { className: 'wsm-err wsm-gutter' }, error),
+        notice !== null && React.createElement('div', { className: 'wsm-note wsm-gutter' }, notice),
         rows.length === 0
-          ? React.createElement('div', { className: 'wsm-empty' },
+          ? React.createElement('div', { className: 'wsm-empty wsm-gutter' },
             '归档区里没有还留着文件的会话。\n\n在侧栏用会话的「归档会话」把会话移进来，就会出现在这里。')
-          : React.createElement('div', { className: 'wsm-list' }, list2),
-        React.createElement('div', { className: 'wsm-foot' },
+          : React.createElement('div', { className: 'wsm-list wsm-gutter' }, list2),
+        React.createElement('div', { className: 'wsm-foot wsm-gutter' },
           React.createElement('span', { className: 'wsm-count' },
             selected.size > 0 ? '已选 ' + selected.size + ' 个' : '勾选后可批量恢复或删除'),
           React.createElement('span', { className: 'wsm-spacer' }),
