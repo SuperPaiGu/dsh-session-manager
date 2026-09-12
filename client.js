@@ -197,10 +197,16 @@ window.__ModuleLoader__.load({
         return next
       })
 
-      /** Drop ids from this panel's list and report the outcome. */
+      /**
+       * Drop ids from this panel's list and report the outcome. A row is only
+       * removed for an operation that actually happened; `skipped` means the
+       * Host did nothing (running session, nothing on disk), and reporting it
+       * as a failure would be as wrong as silently dropping the row.
+       */
       const settle = (results, label, refresh) => {
         const done = results.filter((r) => r.status === 'ok' || r.status === 'deleted').map((r) => r.id)
-        const failed = results.filter((r) => r.status === 'error' || r.status === 'skipped')
+        const failed = results.filter((r) => r.status === 'error')
+        const skipped = results.filter((r) => r.status === 'skipped')
         setRemoved((prev) => {
           const next = new Set(prev)
           for (const id of done) next.add(String(id))
@@ -212,6 +218,16 @@ window.__ModuleLoader__.load({
         if (failed.length > 0) {
           setError(failed.length + ' 个会话' + label + '失败：'
             + failed.map((r) => r.message || r.reason || r.status).join('；').slice(0, 400))
+        }
+        if (skipped.length > 0) {
+          const reasons = [...new Set(skipped.map((r) => r.reason || 'skipped'))]
+          setNotice(skipped.length + ' 个会话未' + label + '：' + reasons.map((reason) => (
+            reason === 'running' ? '正在运行'
+              : reason === 'no-artifact' ? '磁盘上没有它的文件夹（它保持在归档区，未做改动）'
+                : reason === 'missing' ? '已不在会话记录里'
+                  : reason === 'not-archived' ? '本来就不在归档区'
+                    : reason
+          )).join('；'))
         }
       }
 

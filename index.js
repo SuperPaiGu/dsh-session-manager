@@ -255,6 +255,17 @@ async function forgetArchived(ctx, id) {
 
 /**
  * Delete one stored session's folder.
+ *
+ * The archive entry is cleared ONLY after the folder is confirmed gone. That
+ * ordering is the whole contract of this operation: clearing the entry un-hides
+ * the session on every grouping surface, so clearing it while the folder still
+ * exists does not delete anything — it silently turns a delete into a restore.
+ *
+ * A session that has no folder to delete (never materialized, or already
+ * cleaned up) is therefore NOT the same as a deleted one: it reports
+ * `no-artifact`, and the caller drops the row without touching the archive set,
+ * so the session stays hidden instead of reappearing in the sidebar.
+ *
  * @param id - the session id from the request.
  * @param deps - resolved services.
  * @returns one per-session result row.
@@ -283,12 +294,20 @@ async function deleteOne(id, deps) {
   }
 
   if (!(await directoryExists(dir))) {
-    // A session can be known to persistence with no materialized artifact yet.
+    // Nothing on disk to remove. Report it plainly and leave the archive set
+    // alone: this session is not deleted, and un-hiding it would be wrong.
     return { id, status: 'skipped', reason: 'no-artifact' }
   }
 
   const outcome = await recycle(shell, dir)
   if (!outcome.ok) return { id, status: 'error', message: outcome.message }
+
+  // Confirm the folder is gone before touching the archive set. A recycle call
+  // that reported success without removing anything must not un-hide the row.
+  if (await directoryExists(dir)) {
+    return { id, status: 'error', message: 'folder survived the recycle call; archive entry kept' }
+  }
+
   return { id, status: 'deleted', archive: await forgetArchived(ctx, id) }
 }
 
