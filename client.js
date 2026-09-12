@@ -42,8 +42,8 @@ window.__ModuleLoader__.load({
    right inset that clears the strip; the bar and notices end in text and stay
    at 32px. On a narrow column the extra inset simply stops mattering. */
 .wsm-gutter{padding-left:32px;padding-right:32px}
-.wsm-list.wsm-gutter{padding-right:132px}
-.wsm-foot.wsm-gutter{padding-right:150px}
+.wsm-list.wsm-gutter{padding-right:calc(120px + 12%)}
+.wsm-foot.wsm-gutter{padding-right:calc(120px + 12%)}
 .wsm-bar{display:flex;align-items:center;gap:8px;padding-top:10px;padding-bottom:10px;flex-wrap:wrap}
 .wsm-count{color:var(--dsw-alias-label-secondary);font-size:12.5px}
 .wsm-spacer{flex:1}
@@ -52,7 +52,7 @@ window.__ModuleLoader__.load({
 .wsm-btn:disabled{opacity:.6;cursor:default}
 .wsm-btn.danger{background:none;border-color:var(--dsw-alias-border-l1);color:var(--dsw-alias-label-error,#e5534b)}
 .wsm-list{flex:1;min-height:0;overflow:auto;padding-top:4px;padding-bottom:12px}
-.wsm-row{display:flex;align-items:flex-start;gap:9px;padding:7px 50px 7px 8px;border-radius:8px}
+.wsm-row{display:flex;align-items:flex-start;gap:9px;padding:7px 8px;border-radius:8px}
 .wsm-row:hover{background:var(--dsw-alias-bg-layer-2)}
 .wsm-row input[type=checkbox]{margin-top:3px;flex:none}
 .wsm-main{flex:1;min-width:0}
