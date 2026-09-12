@@ -1,60 +1,56 @@
 # dsh-session-manager
 
-给 DeepSeek Harness（DSH）的 Web GUI 加一个**批量管理会话**工具，**纯增量、完全不动官方界面**：
-- 侧栏**底部**出现「**批量管理会话**」按钮，点开一个批量面板：列出所有会话、勾选、全选、一键删除选中；每行也有独立的「删除」按钮（单删）
-- 删除是**物理删除并送进系统回收站**（`Microsoft.VisualBasic` + `SendToRecycleBin`），不是不可恢复的 `rm`；正在运行的会话会被置灰、不可删除
+给 DeepSeek Harness（DSH）的 Web GUI 加一个 **「归档」 面板**：在会话顶部的 **对话 / 轨迹 标签右边**再多一个 **归档** 标签，把官方的**归档区当成回收站**用——能看见里面有什么，能**恢复**回侧栏，也能**批量删除**进系统回收站。
 
-**不替换官方侧栏**：DSH 自带的搜索、视图切换、分组/未分组、排序、拖拽、官方三点菜单全部原样保留，插件只通过 DSH 官方的加性插槽（additive slots）额外加了入口。卸载后官方界面恢复。
+> **0.3.0 是重写。** 旧版（0.2.x）在侧栏底部加「批量管理会话」按钮，靠 `sessionPersistence.locate(header)` 拿路径。**那个 API 在 DSH 0.1.5 已被删除**，所以旧版在新版 DSH 上根本无法工作。0.3.0 改成推导路径 + 归档面板。
 
-> ## ⚠️【重要】当前已知问题（使用前必读）
->
-> **删除后批量管理面板立即消失，但官方侧栏可能仍然显示已删除的会话（尤其是打开过的会话），需要重启 DSH Web 才能清空侧栏。**
->
-> 这是 **DSH 内核的限制**（没有公开的会话释放/删除 API，插件无法强制移除内存中的会话），不是本插件的 bug；删除本身是完整、安全的（日志已进回收站）。详见文末「⚠️ 当前已知问题（重要，务必阅读）」。
+## 界面
 
-## 功能
+标签栏变成 **对话 | 轨迹 | 归档**。「归档」面板里**只列出真正被归档、且日志还在磁盘上的会话**：
 
-- **批量管理面板**：侧栏底部「批量管理会话」按钮 → 面板列出全部会话（含未分组），支持：
-  - 每个会话一行 + 勾选框
-  - **每行独立「删除」按钮**（单删，确认后进回收站）
-  - 全选 / 清空
-  - 已选计数
-  - 「删除选中」（进回收站）
-  - **运行中的会话置灰，不可勾选、不可删除**（提示"进行中（不可删除）"）
-  - **删除后立即消失**：面板里即时移除（关闭再打开也不复现）；官方侧栏的隐藏受 DSH 内核限制，**可能残留到重启**（见顶部警告与文末「当前已知问题」）
-- 删除通过 DSH Host 的 `sessionPersistence.locate` 精确定位会话目录，再移入系统回收站；路径带护栏，不会误删 Work 区外的东西
-- 自动生效：装好后每次打开 DSH Web 就有，无需手动激活或审批
+- 每行：标题、工作目录、最后活动时间
+- 每行两个按钮：**恢复**（取消归档，回到侧栏）/ **删除**（日志文件夹进系统回收站）
+- **勾选后可批量恢复 / 批量删除**，支持全选
+- 删除前弹确认框，明确告知「移入系统回收站，可从回收站恢复」
+- 正在运行的会话置灰不可勾选
 
-> **v0.2.x 起改为纯增量**，不再遮蔽官方侧栏。
-> **v0.2.4**：删除统一收进批量面板（每行单删 + 多选批量），移除了会话顶栏垃圾桶——原单删只能作用于当前打开的（几乎总是运行中的）会话，没有实用价值。
-> **v0.2.8**：删除成功的会话立即从批量面板消失（本地过滤 + 列表刷新），关闭面板再打开也不会复现。
-> **v0.2.9**：删除成功后 Host 把会话 id 加入官方归档集合（`workspaceRegistry.archiveSession`），尝试让官方侧栏立即隐藏；**已在 DSH 0.1.0-rc.7 实测，仍未生效**，内存常驻会话残留到重启（见「当前已知问题」）。
+**不替换任何官方界面**：侧栏、官方三点菜单（含官方「归档会话」）、对话、轨迹全部原样保留，插件只是往官方 `conversation.view` 插槽**追加**一个条目。卸载后官方界面恢复原状。
+
+## 怎么用
+
+1. 在侧栏用会话的「**归档会话**」（官方三点菜单）把不想看见的会话移进归档区
+2. 打开 **归档** 标签，它就出现在列表里
+3. 想让它回来就点 **恢复**；想彻底清理就点 **删除**（进系统回收站）
 
 ## 怎么安装（手动安装）
 
-### 你需要先有
-
-- 电脑上已经能用的 DSH（终端里 `dsh` 命令能跑）
-
-### 两步装好
-
-**第 1 步**：到本仓库的 Release 页面下载 `dsh-session-manager-0.2.10.tgz`，然后在终端执行：
+**第 1 步**：到本仓库 Release 下载 `dsh-session-manager-0.3.0.tgz`，然后执行：
 
 ```sh
-dsh plugin --profile web add ./dsh-session-manager-0.2.10.tgz
+dsh plugin --profile web add ./dsh-session-manager-0.3.0.tgz
 ```
 
-**第 2 步**：重启 DSH Web 服务（先停止当前的 `dsh web`，再重新启动）。
+**第 2 步**：**把插件加进 profile 的 bundles 列表**。这一步不能省——`dsh plugin add` 只把包装进 `node_modules`，不会自动启用它：
 
-打开侧栏即可使用。安装后，在 **设置 → 插件 → 插件列表** 中会显示为 **`session-manager`**。
+打开 `%DSH_HOME%\profiles\web\package.json`（默认即 `C:\Users\<你>\.dsh\profiles\web\package.json`），在 `dsh.profile.bundles` 数组末尾加上：
 
-### 从 GitHub 直接安装（不下载文件）
+```json
+"dsh-session-manager"
+```
+
+**第 3 步**：重启 DSH Web 服务（先停当前的 `dsh web`，再重新启动）。
+
+**验收**：任意打开一个**有内容的历史会话**（空白新会话的顶部会被官方隐藏），顶部标签栏出现 **对话 | 轨迹 | 归档** 三个标签。
+
+> 注意：空白新会话看不到标签栏，这是 DSH 官方行为（`hideChrome`），不是插件问题。
+
+### 从 GitHub 直接安装
 
 ```sh
 dsh plugin --profile web add github:SuperPaiGu/dsh-session-manager
 ```
 
-装完同样需要重启 DSH Web 服务。
+装完同样需要第 2、3 步。
 
 ### 卸载
 
@@ -62,30 +58,44 @@ dsh plugin --profile web add github:SuperPaiGu/dsh-session-manager
 dsh plugin --profile web remove dsh-session-manager
 ```
 
-卸载并重启后，官方界面一切照旧（本就不受影响）。
+再把 `bundles` 里那行删掉并重启即可。
 
-## 注意事项
+## 删除是怎么做的
 
-- **删除后立即消失**：批量面板里立刻移除（关闭再打开也不复现）。官方侧栏的隐藏受 DSH 内核限制，**实测 rc.7 下内存常驻会话仍残留，需重启清空**（见顶部警告与「当前已知问题」）。
-- **删除是回收站删除**：会话目录被移进系统回收站，可以从回收站恢复。它不是立即永久删除。
-- **正在运行的会话不可删**：运行中的会话置灰，勾选框与删除按钮均不可用（Host 端也会保护跳过）。
-- **未持久化的会话**：新建但还没有日志落盘的会话无法删除（Host 报 missing），这类空会话重启后会自然消失。
-- **纯增量**：本插件不遮蔽、不替换任何官方区域，只通过 `sidebar.footer.action` 官方加性插槽叠加功能（批量面板作为按钮组件的子组件渲染）；侧栏隐藏复用官方 `workspaceRegistry.archiveSession` 归档集合，不新增任何界面。
+**删除 = 把该会话的整个文件夹送进 Windows 回收站**（`Microsoft.VisualBasic.FileIO.FileSystem::DeleteDirectory(..., SendToRecycleBin)`），不是不可恢复的删除。整个会话文件夹（含所有世代的日志文件）一起走，所以 DSH 以后换 Session 格式版本也不影响。
 
-## ⚠️ 当前已知问题（重要，务必阅读）
+文件夹位置由**三样公开信息推导**得出，不依赖任何已删除的 API：
 
-**现象**：删除会话后，**批量管理面板里立即消失**，但**官方侧栏里仍然显示**该会话（点开仍能看到标题，但日志文件其实已经进了回收站）。**重启 DSH Web 后侧栏恢复干净**。此现象在 DSH 0.1.0-rc.7 上已实测复现。
+```
+<root>/<projectKey(header.cwd)>/<encodeSegment(header.id)>/
+```
 
-**为什么会这样**：DSH 官方侧栏的会话列表由**内存中的会话（已打开过、agent 常驻）** + 磁盘上的冷会话两部分组成：
+- `<root>` 取自 jsonl 后端自己的公开字段 `sessionPersistence.config.root`（本机即 `~/.dsh/sessions`）
+- 两段编码规则与官方后端**逐字符一致**（非 ASCII 走 `~XXXX` 十六进制转义）
+- **删的是目录**，所以 `session.v3.jsonl.zstd` 还是将来的 v4 都跟着一起走
 
-- 磁盘冷会话：删除后文件即消失，列表刷新（`ctx.sessions.refresh()`）后立即从侧栏消失。✅
-- 内存常驻会话：**DSH 内核没有任何公开 API 允许插件强制释放（dispose）一个内存会话**——`AgentHandle.dispose()` 是创建者专属能力（Web 后端恢复会话后即丢弃该能力），也没有任何"删除/关闭会话"的官方 RPC。因此这类会话会一直留在侧栏列表里，直到 DSH 进程重启后按磁盘重新扫描（文件已删，自然不再出现）。
+已用真实磁盘做过实证：本机 **10 个项目目录、31 个会话目录 100% 命中**（`tests/derive-check.mjs`，只读，可随时自己跑）。
 
-**插件已做的努力（v0.2.9）**：删除成功后调用官方 `workspaceRegistry.archiveSession(id)`，把 id 加入注册表归档集合——这是官方分组视图过滤行的唯一机制。**理论上**侧栏应立即隐藏该行且刷新后不回来；**实测（含 DSH 0.1.0-rc.7）归档隐藏未能生效**——归档调用成功与否无法从外部确认，但侧栏残留依旧存在，原因可能是归档帧未推送或客户端分组视图未随之重算。
+**正在运行的会话会被跳过**：它的日志被写入租约持有，硬抽走不是用户想要的结果。
 
-**当前结论**：删除在数据层面是完整、安全的（文件已进回收站，重启后侧栏必然干净）；残留只是**界面列表的显示问题**，不影响数据正确性。**在 DSH 提供公开的会话释放 API 之前，这是无法根治的 DSH 内核限制**。
+## 恢复是怎么做的（以及为什么需要它）
 
-**后续计划**：等 DSH 内核提供公开的会话释放/删除 API（或本机 DSH 升级后归档帧行为改变），即可让官方侧栏也即时移除该行，无需改动本插件界面。
+DSH 0.1.5 的归档是**单向**的：`WorkspaceRegistry` 只公开 `archiveSession()`，官方 README 明确写着「no unarchive action exists yet」。也就是说**取消归档在官方接口层面根本不存在**。
+
+本插件通过 DSH 的 **storage 域**直接改写那份归档名单（`~/.dsh/storages/workspace.json` 的 `archivedSessionIds`）来实现恢复。归档从来不碰 workspace 的成员记账，所以把 id 从名单里摘掉，会话就回到了它原来的位置。
+
+代价有两点，都已做进产品行为里：
+
+- **官方侧栏要刷新一次页面才会看到**：运行中的 `WorkspaceRegistry` 持有一份内存副本，直接改盘不会通知它。恢复后面板会提示「若侧栏没立刻出现，刷新一下页面」。
+- **用的是标注为诊断用途的内部面**：`storage.domain` 在官方文档里是诊断接口。DSH 升级后它有可能变化，届时恢复会失败并**明确报错**（不会静默）；删除通道完全不依赖它。
+
+## 已知限制
+
+- **面板读的是 Host 权威归档集合**（而非浏览器端快照）：浏览器端那份是连接时的快照，另一个 DSH 实例改了归档状态它不会自动更新，所以插件改为每次打开面板、每次操作后都问 Host 要一次。
+- **删除后的侧栏残留**：已被内存常驻（打开过）的会话，删掉文件后仍会留在官方侧栏，直到 DSH 重启。**这是 DSH 内核限制**——没有任何公开 API 能让插件释放一个内存会话（`AgentHandle.dispose()` 是创建者专属能力）。删除本身是完整、安全的。
+- **删除会顺手清掉归档名单里的那条 id**，避免留下指向空洞的悬空记录（本机原本已积了 253 条这种历史垃圾）。
+- **只显示"日志还在磁盘上"的归档会话**：归档名单里那些文件早被删掉的旧记录不会出现在面板里（它们本来也无从恢复或删除）。
+- 仅 Windows（回收站调用依赖 `Microsoft.VisualBasic`）。
 
 ## 怎么安装（Agent 安装）
 
@@ -97,7 +107,7 @@ dsh plugin --profile web remove dsh-session-manager
 dsh --version    # 命令不存在则提示用户先安装 DSH
 ```
 
-### 1. 安装插件（首选 GitHub，无需下载文件）
+### 1. 安装插件
 
 ```sh
 dsh plugin --profile web add github:SuperPaiGu/dsh-session-manager
@@ -105,19 +115,28 @@ dsh plugin --profile web add github:SuperPaiGu/dsh-session-manager
 
 **验收**：退出码 0，输出含 `+ dsh-session-manager`。
 
-（如需固定版本：从 Release 下载 `dsh-session-manager-0.2.10.tgz`，用 `dsh plugin --profile web add ./dsh-session-manager-0.2.10.tgz`。）
+（如需固定版本：从 Release 下载 `dsh-session-manager-0.3.0.tgz`，用 `dsh plugin --profile web add ./dsh-session-manager-0.3.0.tgz`。）
 
-### 2. 重启 DSH Web 服务
+### 2. 启用 bundle（关键步骤）
+
+编辑 `$DSH_HOME/profiles/web/package.json`，把 `"dsh-session-manager"` 加进 `dsh.profile.bundles` 数组，并在 `dependencies` 里确认有 `"dsh-session-manager"` 条目。
+
+**验收**：`dsh --profile web --dump-config` 输出含 `dsh-session-manager` 层。
+
+### 3. 重启 DSH Web 服务
 
 停止当前 `dsh web`，再以用户原有方式重新启动。
 
-**验收**：启动日志无报错；`设置 → 插件 → 插件列表` 中 `session-manager` 行为 active。
+**验收**：启动日志无报错；打开一个有内容的历史会话，顶部出现 **对话 | 轨迹 | 归档**。
 
-### 3. 验收清单
+### 4. 验收清单
 
 - [ ] 第 1 步退出码 0
-- [ ] `dsh --profile web --dump-config` 含 `session-manager` 层
-- [ ] 重启后侧栏底部出现「批量管理会话」按钮
+- [ ] `--dump-config` 含 `dsh-session-manager` 层
+- [ ] 重启后设置 → 插件 → 插件列表 中 `session-manager` 行 active
+- [ ] 历史会话顶部出现「归档」标签；无归档会话时显示引导文案
+- [ ] 归档一个会话 → 出现在面板；点「恢复」→ 面板移除、磁盘名单减少
+- [ ] `node tests/derive-check.mjs` 全绿（路径推导与真实磁盘一致）
 
 ## 目录结构
 
@@ -125,8 +144,9 @@ dsh plugin --profile web add github:SuperPaiGu/dsh-session-manager
 dsh-session-manager/   组合包根
 ├── package.json        dsh.bundle + dsh.client 声明
 ├── cordis.patch.yml    插件层（id session-manager → dsh-session-manager）
-├── index.js            Host 插件：/session-manager/delete 端点 + 回收站删除
-├── client.js           Web 客户端 bundle：纯增量（侧栏底部批量按钮 + 批量面板）
+├── index.js            Host：/session-manager/{archived,restore,delete} + 路径推导 + 回收站删除
+├── client.js           Web 客户端：向 conversation.view 注册「归档」面板
+├── tests/              路径推导只读实证
 └── README.md
 ```
 
