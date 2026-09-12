@@ -1,3 +1,4 @@
 *.tgz
 node_modules/
 test-results/
+release-notes-*.md
