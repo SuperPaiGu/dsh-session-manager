@@ -1,89 +1,104 @@
 /**
- * dsh-session-manager, browser half — additive-only build (v0.2.9).
+ * dsh-session-manager, browser half (v0.3.0).
  *
- * Does NOT replace the official sidebar. It adds one piece through DSH's own
- * additive slot, so every official feature is preserved:
- *   - sidebar.footer.action : a「批量管理会话」button at the sidebar foot;
- *     the batch panel renders inside the button component itself
- *     (self-contained, independent hooks — no React #310).
+ * Registers ONE Conversation View into the shipped `conversation.view` slot
+ * (session-scoped list, already occupied by `chat` order 0 and `trajectory`
+ * order 10). With `order: 20` the 「归档」 tab lands to the right of 「对话」 and
+ * 「轨迹」: the tab strip projects every entry of that slot, and the shell
+ * renders only the active one (`renderSlot(..., { only: active.id })`), so the
+ * label and the panel come from this single registration.
  *
- * Deletion is unified in the batch panel: every row has its own「删除」button
- * (single delete) plus multi-select +「删除选中」. Running sessions are shown
- * dimmed and cannot be selected or deleted (host skips them anyway).
+ * Why this slot carries a session-wide list: `conversation.view` publishes
+ * `useSessions` and `useWorkspaces` as standard hooks, and the session list is
+ * NOT archive-filtered by the Host — `session-controller`'s `list()` returns
+ * every persisted Session, while the sidebar removes archived rows at render
+ * time (`sessionVisible` in ui-workspace derives with `archivedSessionIds`).
+ * The archived rows are therefore present here and only hidden there, which is
+ * exactly the raw material an archive browser needs.
  *
- * After a successful delete the session list is refreshed
- * (ctx.sessions.refresh) AND the deleted id is added to an apply-level
- * `removedStore` that filters it out of the panel immediately and survives
- * panel close/reopen and occupant remounts. The official sidebar clears at
- * the same time through the host: after recycling the files the host adds the
- * id to the registry-global archive set (`workspaceRegistry.archiveSession`),
- * which pushes `host/archived-sessions-changed`; grouping surfaces derive with
- * that set, so the row disappears from the sidebar in every mode — no restart,
- * and the hide is persisted (it survives reloads).
- *
- * Deletion POSTs to the host `/session-manager/delete` endpoint, which recycles
- * the session folders into the OS Recycle Bin and skips running sessions.
+ * Deletion POSTs to the host `/session-manager/delete` endpoint, which sends
+ * each session folder to the Windows Recycle Bin. Nothing is archived by this
+ * plugin: the registry-global archive set has no removal path in 0.1.5, so
+ * appending to it would only manufacture permanent orphans.
  *
  * Loaded by the client module system as /plugins/dsh-session-manager/client.js.
  */
+
 window.__ModuleLoader__.load({
   id: 'dsh-session-manager',
   factory: (require) => {
     const React = require('react')
 
     const CSS = `
-.wsm-ibtn{background:none;border:none;color:var(--dsw-alias-label-secondary);padding:4px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
-.wsm-ibtn:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
-.wsm-fbtn{background:none;border:none;color:var(--dsw-alias-label-primary);padding:4px 8px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap}
-.wsm-fbtn:hover{background:var(--dsw-alias-bg-layer-2)}
-.wsm-fbtn .wsm-lbl{font-size:12px}
-.wsm-modal-title{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary);margin-bottom:10px}
-.wsm-modal-body{font-size:12.5px;color:var(--dsw-alias-label-secondary);margin-bottom:14px;max-height:40vh;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-.wsm-modal-foot{display:flex;justify-content:flex-end;gap:8px}
-.wsm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:1000}
-.wsm-modal{background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:16px;min-width:300px;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
-.wsm-btn{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:5px 10px;font-size:12.5px;cursor:pointer}
-.wsm-btn:hover{filter:brightness(1.08)}
-.wsm-btn.danger{background:var(--dsw-alias-state-error-primary);border-color:transparent;color:#fff}
-.wsm-btn:disabled{opacity:.6;cursor:default}
-.wsm-panel{background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:16px;width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);pointer-events:auto}
-.wsm-panel-head{display:flex;align-items:center;gap:8px;margin-bottom:10px}
-.wsm-panel-title{flex:1;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary)}
-.wsm-panel-x{background:none;border:none;color:var(--dsw-alias-label-secondary);font-size:16px;cursor:pointer;padding:2px 6px;border-radius:6px;line-height:1}
-.wsm-panel-x:hover{background:var(--dsw-alias-bg-layer-2)}
-.wsm-panel-list{flex:1;overflow-y:auto;border-top:1px solid var(--dsw-alias-border-l1);padding-top:8px;display:flex;flex-direction:column;gap:2px}
-.wsm-pitem{display:flex;align-items:center;gap:8px;padding:6px 6px;border-radius:6px}
-.wsm-pitem:hover{background:var(--dsw-alias-bg-layer-1)}
-.wsm-pitem input{accent-color:var(--dsw-alias-brand-primary);flex:none;margin:0;cursor:pointer}
-.wsm-pitem-title{flex:1;font-size:12.5px;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wsm-pitem-meta{font-size:11px;color:var(--dsw-alias-label-secondary);flex:none}
-.wsm-panel-bar{display:flex;align-items:center;gap:8px;border-top:1px solid var(--dsw-alias-border-l1);padding-top:10px;margin-top:10px}
-.wsm-panel-bar span{flex:1;font-size:12.5px;color:var(--dsw-alias-label-secondary)}
-.wsm-error{color:var(--dsw-alias-state-error-primary);font-size:12px;padding:8px 4px}
-.wsm-dim{opacity:.45;pointer-events:none}
-.wsm-pitem-del{background:none;border:none;color:var(--dsw-alias-label-secondary);padding:3px 5px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;flex:none}
-.wsm-pitem-del:hover{background:var(--dsw-alias-state-error-primary);color:#fff}
+.wsm-panel{display:flex;flex-direction:column;height:100%;min-height:0;font-size:13px;color:var(--dsw-alias-label-primary)}
+.wsm-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1);flex-wrap:wrap}
+.wsm-count{color:var(--dsw-alias-label-secondary);font-size:12.5px}
+.wsm-spacer{flex:1}
+.wsm-seg{display:inline-flex;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;overflow:hidden}
+.wsm-seg button{background:none;border:none;color:var(--dsw-alias-label-secondary);padding:4px 10px;font-size:12.5px;cursor:pointer}
+.wsm-seg button+button{border-left:1px solid var(--dsw-alias-border-l1)}
+.wsm-seg button.on{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
+.wsm-btn{background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);padding:4px 10px;border-radius:7px;font-size:12.5px;cursor:pointer}
+.wsm-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-3)}
+.wsm-btn:disabled{opacity:.45;cursor:default}
+.wsm-btn.danger{background:none;border-color:var(--dsw-alias-border-l1);color:var(--dsw-alias-label-error,#e5534b)}
+.wsm-list{flex:1;min-height:0;overflow:auto;padding:6px 8px 12px}
+.wsm-row{display:flex;align-items:flex-start;gap:9px;padding:7px 8px;border-radius:8px}
+.wsm-row:hover{background:var(--dsw-alias-bg-layer-2)}
+.wsm-row input[type=checkbox]{margin-top:3px;flex:none}
+.wsm-main{flex:1;min-width:0}
+.wsm-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wsm-sub{display:block;margin-top:2px;font-size:11.5px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wsm-tag{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;font-size:10.5px;line-height:16px;vertical-align:1px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-secondary)}
+.wsm-rowbtn{background:none;border:none;color:var(--dsw-alias-label-secondary);padding:3px 6px;border-radius:6px;cursor:pointer;font-size:12px;flex:none}
+.wsm-rowbtn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary)}
+.wsm-rowbtn:disabled{opacity:.4;cursor:default}
+.wsm-rowbtn.danger{color:var(--dsw-alias-label-error,#e5534b)}
+.wsm-empty{padding:28px 16px;text-align:center;color:var(--dsw-alias-label-secondary)}
+.wsm-foot{display:flex;align-items:center;gap:8px;padding:9px 14px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
+.wsm-err{padding:6px 14px;color:var(--dsw-alias-label-error,#e5534b);font-size:12px}
+.wsm-note{padding:6px 14px;color:var(--dsw-alias-label-secondary);font-size:12px;background:var(--dsw-alias-bg-layer-2)}
+.wsm-overlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}
+.wsm-modal{width:min(440px,92vw);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px}
+.wsm-modal-title{font-size:14px;font-weight:600;margin-bottom:10px}
+.wsm-modal-body{font-size:12.5px;line-height:1.65;color:var(--dsw-alias-label-secondary);white-space:pre-wrap}
+.wsm-modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 `
 
-    const svg = (d, size) => React.createElement('svg', {
-      width: size || 15, height: size || 15, viewBox: '0 0 16 16', fill: 'currentColor',
-    }, React.createElement('path', { d }))
-    const IconTrash = () => svg('M5.5 3.5h5M6.8 2.4h2.4v1.1H6.8V2.4ZM4 4.6h8l-.8 8.6a1 1 0 0 1-1 .9H5.8a1 1 0 0 1-1-.9L4 4.6Z')
-    const IconBatch = () => svg('M3 3h2v2H3V3Zm0.6 0Zm3.2 0H10v2H6.8V3Zm4.2 0h2v2h-2V3ZM3 7h2v2H3V7Zm0 4h2v2H3v-2Zm3.8-4H10v2H6.8V7Zm4.2 0h2v2h-2V7ZM6.8 11H10v2H6.8v-2Zm4.2 0h2v2h-2v-2Z')
-    const IconClose = () => svg('M4 4l8 8M12 4l-8 8')
+    /** Read the authoritative archive set from the host. */
+    async function apiArchived() {
+      const res = await fetch('/session-manager/archived').then((r) => r.json())
+      if (!res || !res.ok || !Array.isArray(res.ids)) throw new Error('无法读取归档集合')
+      return res.ids.map(String)
+    }
 
-    /** POST a batch of session ids to the host delete endpoint; returns per-session results. */
-    async function apiDelete(ids) {
-      const res = await fetch('/session-manager/delete', {
+    /** POST a batch of session ids to one host action endpoint. */
+    async function apiCall(path, ids) {
+      const res = await fetch(path, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ids }),
       }).then((r) => r.json())
-      if (!res || !res.ok) throw new Error((res && res.error) || '删除请求失败')
+      if (!res || !res.ok) throw new Error((res && res.error) || '请求失败')
       return res.results || []
     }
 
-    /** Shared confirmation modal (fixed overlay, additive-safe). */
+    /** Relative time, coarse on purpose. */
+    function relativeTime(ts) {
+      if (typeof ts !== 'number' || !Number.isFinite(ts)) return ''
+      const diff = Date.now() - ts
+      if (diff < 0) return '刚刚'
+      const min = Math.floor(diff / 60000)
+      if (min < 1) return '刚刚'
+      if (min < 60) return min + ' 分钟前'
+      const hr = Math.floor(min / 60)
+      if (hr < 24) return hr + ' 小时前'
+      const day = Math.floor(hr / 24)
+      if (day < 30) return day + ' 天前'
+      return new Date(ts).toLocaleDateString()
+    }
+
+    /** Shared confirmation modal. */
     function ConfirmDialog({ title, body, busy, onCancel, onConfirm, confirmLabel }) {
       return React.createElement('div', { className: 'wsm-overlay', onClick: busy ? undefined : onCancel },
         React.createElement('div', { className: 'wsm-modal', onClick: (e) => e.stopPropagation() },
@@ -98,171 +113,207 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * ② 侧栏底部：批量管理会话按钮。
-     * 打开状态 + 已删除集合都放在外部 store（factory 闭包内），用
-     * useSyncExternalStore 订阅：即使 occupant 因会话列表刷新被重挂，
-     * 面板打开状态和已删过滤也不丢。
+     * The 「归档」 panel — the archive set is the recycle bin, so this lists
+     * ONLY archived sessions. Hook calls stay unconditional at the top; the
+     * session array is derived with useMemo over the two framework hooks.
+     *
+     * `removed` carries ids this panel has already acted on (restored or
+     * deleted). The archive set a client holds arrives with the connection
+     * snapshot and is not re-read afterwards, so without it a restored row
+     * would reappear here until the page reloads.
      */
-    function createFooterButton(batchStore, removedStore, onRefresh) {
-      return function FooterButton(props) {
-        const open = React.useSyncExternalStore(batchStore.subscribe, batchStore.getSnapshot)
-        return React.createElement(React.Fragment, null,
-          React.createElement('button', {
-            type: 'button', className: 'wsm-fbtn', title: '批量管理会话',
-            onClick: () => batchStore.set(true),
-          },
-            React.createElement(IconBatch),
-            props.wide && React.createElement('span', { className: 'wsm-lbl' }, '批量管理会话'),
-          ),
-          open && React.createElement(BatchPanel, { ...props, onClose: () => batchStore.set(false), onRefresh, removedStore }),
-        )
-      }
-    }
-
-    /** ③ 批量管理面板（独立组件，hooks 恒定，避免 React #310） */
-    function BatchPanel(props) {
+    function ArchivePanel(props) {
       const list = props.useSessions((s) => s)
-      const workspaces = props.useWorkspaces((s) => s.items)
-      const onClose = props.onClose
-      const onRefresh = props.onRefresh
-      const [selected, setSelected] = React.useState(new Set())
-      const [confirm, setConfirm] = React.useState(false)
+      const hookIds = props.useWorkspaces((s) => s.archivedSessionIds)
+      const [hostIds, setHostIds] = React.useState(null)
+      const [selected, setSelected] = React.useState(() => new Set())
+      const [removed, setRemoved] = React.useState(() => new Set())
+      const [confirm, setConfirm] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(null)
-      // 已删除集合存于 apply 级 store：删除成功的会话立即从面板消失，
-      // 且关闭面板再打开也不会重新出现（不等 Host 内存生命周期）。
-      const removed = React.useSyncExternalStore(props.removedStore.subscribe, props.removedStore.getSnapshot)
+      const [notice, setNotice] = React.useState(null)
 
-      // 全部可见会话（工作区成员 + 未分组），最新在前
-      const sessions = React.useMemo(() => {
-        const arr = list.ids
+      // The archive set a client holds arrives with the workspace snapshot and
+      // is not re-read afterwards, so it can lag the Host after another
+      // instance archives or restores a session. Read the authoritative set
+      // from the Host on mount and after every mutation, and keep the
+      // framework hook only as the initial fallback.
+      const reload = React.useCallback(async () => {
+        try {
+          setHostIds(await apiArchived())
+        } catch (reason) {
+          setError(String((reason && reason.message) || reason))
+        }
+      }, [])
+
+      React.useEffect(() => { void reload() }, [reload])
+
+      const archived = React.useMemo(
+        () => new Set(hostIds === null ? (hookIds || []) : hostIds),
+        [hostIds, hookIds],
+      )
+
+      const rows = React.useMemo(() => {
+        const all = list.ids
           .map((id) => list.byId[id])
-          .filter((s) => s !== undefined && s.origin !== 'subagent' && !removed.has(s.id))
-        arr.sort((a, b) => b.updatedAt - a.updatedAt)
+          .filter((s) => s !== undefined
+            && s.origin !== 'subagent'
+            && archived.has(String(s.id))
+            && !removed.has(String(s.id)))
+        const arr = all.slice()
+        arr.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
         return arr
-      }, [list, removed])
-      const allSelected = sessions.length > 0 && sessions.every((s) => selected.has(s.id))
+      }, [list, archived, removed])
+
+      const hiddenCount = React.useMemo(() => list.ids.reduce(
+        (n, id) => (list.byId[id] !== undefined && archived.has(String(id)) ? n + 1 : n), 0,
+      ), [list, archived])
+
+      const selectable = rows.filter((s) => !s.running)
+      const allSelected = selectable.length > 0 && selectable.every((s) => selected.has(s.id))
 
       const toggle = (id) => setSelected((prev) => {
-        const n = new Set(prev)
-        if (n.has(id)) n.delete(id)
-        else n.add(id)
-        return n
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
       })
 
-      const doDeleteSelected = async () => {
-        if (busy) return
-        const ids = [...selected]
-        if (ids.length === 0) return
-        setBusy(true); setError(null)
+      /** Drop ids from this panel's list and report the outcome. */
+      const settle = (results, label, refresh) => {
+        const done = results.filter((r) => r.status === 'ok' || r.status === 'deleted').map((r) => r.id)
+        const failed = results.filter((r) => r.status === 'error' || r.status === 'skipped')
+        setRemoved((prev) => {
+          const next = new Set(prev)
+          for (const id of done) next.add(String(id))
+          return next
+        })
+        setSelected(new Set())
+        setConfirm(null)
+        if (typeof refresh === 'function') refresh()
+        if (failed.length > 0) {
+          setError(failed.length + ' 个会话' + label + '失败：'
+            + failed.map((r) => r.message || r.reason || r.status).join('；').slice(0, 400))
+        }
+      }
+
+      const runDelete = async (ids) => {
+        setBusy(true)
+        setError(null)
+        setNotice(null)
         try {
-          const results = await apiDelete(ids)
-          const deleted = new Set(results.filter((r) => r.status === 'deleted').map((r) => r.id))
-          const skipped = results.filter((r) => r.status !== 'deleted')
-          setSelected((prev) => new Set([...prev].filter((id) => !deleted.has(id))))
-          for (const id of deleted) props.removedStore.add(id)
-          setConfirm(false)
-          setBusy(false)
-          if (deleted.size > 0 && typeof onRefresh === 'function') {
-            onRefresh()
-          }
-          if (skipped.length > 0) {
-            setError('部分未删除：' + skipped.map((s) => s.reason || s.message || s.status).join('；'))
-          }
-        } catch (e) {
-          setError(e instanceof Error ? e.message : String(e))
+          settle(await apiCall('/session-manager/delete', ids), '删除', props.onChanged)
+          await reload()
+        } catch (reason) {
+          setError(String((reason && reason.message) || reason))
+        } finally {
           setBusy(false)
         }
       }
 
-      // 单行删除：确认后删一个会话
-      const [rowDelete, setRowDelete] = React.useState(null)
-      const doDeleteRow = async () => {
-        if (busy || rowDelete === null) return
-        setBusy(true); setError(null)
+      const runRestore = async (ids) => {
+        setBusy(true)
+        setError(null)
+        setNotice(null)
         try {
-          const results = await apiDelete([rowDelete.id])
-          const deleted = results.filter((r) => r.status === 'deleted')
-          if (deleted.length === 0) {
-            const first = results[0]
-            const reason = first && (first.reason || first.message)
-            let why = reason === 'running' ? '该会话正在运行，已被跳过'
-              : reason === 'missing' ? '该会话不存在（可能已删除）'
-                : (reason || '未知原因')
-            setError('未删除：' + why)
-            setBusy(false)
-            return
-          }
-          setBusy(false)
-          setRowDelete(null)
-          props.removedStore.add(rowDelete.id)
-          if (typeof onRefresh === 'function') {
-            onRefresh()
-          }
-        } catch (e) {
-          setError(e instanceof Error ? e.message : String(e))
+          const results = await apiCall('/session-manager/restore', ids)
+          settle(results, '恢复')
+          await reload()
+          const pending = results.filter((r) => r.status === 'ok' && r.registry === 'stale-until-restart').length
+          if (pending > 0) setNotice('已从归档区恢复 ' + pending + ' 个会话；若侧栏没立刻出现，刷新一下页面。')
+        } catch (reason) {
+          setError(String((reason && reason.message) || reason))
+        } finally {
           setBusy(false)
         }
       }
 
-      const rows = sessions.map((s) =>
-        React.createElement('div', {
-          key: s.id,
-          className: 'wsm-pitem' + (s.running ? ' wsm-dim' : ''),
-        },
-          React.createElement('input', {
-            type: 'checkbox', checked: selected.has(s.id),
-            disabled: s.running === true,
-            onChange: () => toggle(s.id),
-          }),
-          React.createElement('span', { className: 'wsm-pitem-title' }, s.title || s.id),
-          React.createElement('span', { className: 'wsm-pitem-meta' },
-            s.running ? '进行中（不可删除）' : (s.completed === true ? '已完成' : '空闲')),
-          !s.running && React.createElement('button', {
-            type: 'button', className: 'wsm-pitem-del', title: '删除',
-            onClick: () => { setError(null); setRowDelete({ id: s.id, title: s.title || s.id }) },
-          }, React.createElement(IconTrash)),
-        ))
-
-      return React.createElement('div', { className: 'wsm-overlay', onClick: busy ? undefined : onClose },
-        React.createElement('div', { className: 'wsm-panel', onClick: (e) => e.stopPropagation() },
-          React.createElement('div', { className: 'wsm-panel-head' },
-            React.createElement('span', { className: 'wsm-panel-title' }, '批量管理会话'),
-            React.createElement('button', { type: 'button', className: 'wsm-panel-x', onClick: onClose }, React.createElement(IconClose)),
+      const list2 = rows.map((s) => React.createElement('div', { className: 'wsm-row', key: s.id },
+        React.createElement('input', {
+          type: 'checkbox',
+          checked: selected.has(s.id),
+          disabled: s.running,
+          title: s.running ? '正在运行，无法删除' : '选择',
+          onChange: () => toggle(s.id),
+        }),
+        React.createElement('div', { className: 'wsm-main' },
+          React.createElement('span', { className: 'wsm-title', title: s.title },
+            s.title || s.id,
+            s.running && React.createElement('span', { className: 'wsm-tag' }, '运行中'),
           ),
-          React.createElement('div', { className: 'wsm-panel-list' }, rows),
-          error && React.createElement('div', { className: 'wsm-error' }, error),
-          React.createElement('div', { className: 'wsm-panel-bar' },
-            React.createElement('span', {}, '已选 ' + selected.size + ' 个会话'),
-            React.createElement('button', {
-              type: 'button', className: 'wsm-btn',
-              onClick: () => setSelected(allSelected ? new Set() : new Set(sessions.map((s) => s.id))),
-            }, allSelected ? '清空' : '全选'),
-            React.createElement('button', {
-              type: 'button', className: 'wsm-btn danger', disabled: selected.size === 0 || busy,
-              onClick: () => { setError(null); setConfirm(true) },
-            }, '删除选中'),
-          ),
-          confirm && React.createElement(ConfirmDialog, {
-            title: '批量删除会话', busy,
-            body: '确定要删除选中的 ' + selected.size + ' 个会话吗？其日志将移入系统回收站（可从回收站恢复）。',
-            onCancel: () => { if (!busy) setConfirm(false) },
-            onConfirm: doDeleteSelected,
-            confirmLabel: '确定',
-          }),
-          rowDelete !== null && React.createElement(ConfirmDialog, {
-            title: '删除会话', busy,
-            body: '确定要删除会话“' + rowDelete.title + '”吗？其日志将移入系统回收站（可从回收站恢复）。',
-            onCancel: () => { if (!busy) setRowDelete(null) },
-            onConfirm: doDeleteRow,
-            confirmLabel: '确定',
-          }),
+          React.createElement('span', { className: 'wsm-sub', title: (s.cwd || '') + '  ·  ' + s.id },
+            (s.cwd || '（无目录）') + '  ·  ' + (relativeTime(s.updatedAt) || '未知时间')),
         ),
+        React.createElement('button', {
+          type: 'button',
+          className: 'wsm-rowbtn',
+          disabled: busy,
+          title: '恢复到侧栏（取消归档）',
+          onClick: () => { void runRestore([s.id]) },
+        }, '恢复'),
+        React.createElement('button', {
+          type: 'button',
+          className: 'wsm-rowbtn danger',
+          disabled: s.running || busy,
+          title: s.running ? '正在运行，无法删除' : '删除该会话（进系统回收站）',
+          onClick: () => setConfirm({ kind: 'one', ids: [s.id], title: s.title || s.id }),
+        }, '删除'),
+      ))
+
+      return React.createElement('div', { className: 'wsm-panel' },
+        React.createElement('div', { className: 'wsm-bar' },
+          React.createElement('span', { className: 'wsm-count' },
+            '归档区 ' + rows.length + ' 个' + (hiddenCount > rows.length ? '（共 ' + hiddenCount + ' 条归档记录）' : '')),
+          React.createElement('span', { className: 'wsm-spacer' }),
+          React.createElement('button', {
+            type: 'button', className: 'wsm-btn', disabled: selectable.length === 0,
+            onClick: () => setSelected(allSelected ? new Set() : new Set(selectable.map((s) => s.id))),
+          }, allSelected ? '取消全选' : '全选'),
+        ),
+        error !== null && React.createElement('div', { className: 'wsm-err' }, error),
+        notice !== null && React.createElement('div', { className: 'wsm-note' }, notice),
+        rows.length === 0
+          ? React.createElement('div', { className: 'wsm-empty' },
+            '归档区里没有还留着文件的会话。\n\n在侧栏用会话的「归档会话」把会话移进来，就会出现在这里。')
+          : React.createElement('div', { className: 'wsm-list' }, list2),
+        React.createElement('div', { className: 'wsm-foot' },
+          React.createElement('span', { className: 'wsm-count' },
+            selected.size > 0 ? '已选 ' + selected.size + ' 个' : '勾选后可批量恢复或删除'),
+          React.createElement('span', { className: 'wsm-spacer' }),
+          React.createElement('button', {
+            type: 'button',
+            className: 'wsm-btn',
+            disabled: selected.size === 0 || busy,
+            onClick: () => { void runRestore([...selected]) },
+          }, '恢复选中'),
+          React.createElement('button', {
+            type: 'button',
+            className: 'wsm-btn danger',
+            disabled: selected.size === 0 || busy,
+            onClick: () => setConfirm({ kind: 'batch', ids: [...selected], title: null }),
+          }, '删除选中'),
+        ),
+        confirm !== null && React.createElement(ConfirmDialog, {
+          title: confirm.kind === 'batch' ? '批量删除会话' : '删除会话',
+          body: (confirm.kind === 'batch'
+            ? '确定要删除选中的 ' + confirm.ids.length + ' 个会话吗？'
+            : '确定要删除会话“' + confirm.title + '”吗？')
+            + '\n\n它们的日志文件夹会被移入系统回收站，可以从回收站恢复。',
+          busy,
+          onCancel: () => { if (!busy) setConfirm(null) },
+          onConfirm: () => { void runDelete(confirm.ids) },
+          confirmLabel: '确定删除',
+        }),
       )
     }
 
+    /** Stable component identity: props are read through the framework hooks. */
+    function ArchiveView(props) {
+      return React.createElement(ArchivePanel, props)
+    }
+
     return {
-      inject: ['slots', 'sessions', 'workspaces', 'locale'],
+      inject: ['slots', 'sessions'],
       apply(ctx) {
         const style = document.createElement('style')
         style.dataset.plugin = 'dsh-session-manager'
@@ -270,39 +321,25 @@ window.__ModuleLoader__.load({
         document.head.append(style)
         ctx.effect(() => () => style.remove(), 'session-manager: styles')
 
-        // 批量面板打开状态 + 已删除集合存于 apply 级 store：occupant 重挂不丢失。
-        const batchStore = (() => {
-          let open = false
-          const listeners = new Set()
-          return {
-            getSnapshot: () => open,
-            subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn) },
-            set: (v) => { open = v; for (const fn of [...listeners]) fn() },
-          }
-        })()
-        const removedStore = (() => {
-          let removed = new Set()
-          const listeners = new Set()
-          return {
-            getSnapshot: () => removed,
-            subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn) },
-            add: (id) => {
-              if (removed.has(id)) return
-              const n = new Set(removed)
-              n.add(id)
-              removed = n
-              for (const fn of [...listeners]) fn()
-            },
-          }
-        })()
+        // Deleted sessions were cold by definition (a running one is skipped),
+        // so the Host list re-read from disk drops them right away.
+        const ArchiveEntry = (props) => React.createElement(ArchiveView, {
+          ...props,
+          onDeleted: () => { void ctx.sessions.refresh() },
+        })
 
-        // 侧栏底部「批量管理会话」(footer.action, list/root)。删除统一在
-        // 批量面板里进行（每行可单删 + 多选批量删）。
-        ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-          name: 'sidebar.footer.action',
-          id: 'session-manager-batch',
-          order: 100,
-        }, createFooterButton(batchStore, removedStore, () => { void ctx.sessions.refresh() })))
+        // `conversation.view` is declared by the conversation shell, which may
+        // activate after this row. A bare register would run against an
+        // undeclared slot and fail the whole loader entry, so wait for the
+        // declaration: `slots.inject` installs on declaration, removes the
+        // contribution when the declaration collapses, and reruns on
+        // redeclaration.
+        ctx.effect(() => ctx.slots.inject('conversation.view', () => ctx.slots.register({
+          name: 'conversation.view',
+          id: 'archive',
+          order: 20,
+          label: '归档',
+        }, ArchiveEntry)), 'session-manager: archive view')
       },
     }
   },
