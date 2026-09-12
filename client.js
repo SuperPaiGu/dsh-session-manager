@@ -31,19 +31,19 @@ window.__ModuleLoader__.load({
 
     const CSS = `
 .wsm-panel{display:flex;flex-direction:column;height:100%;min-height:0;font-size:13px;color:var(--dsw-alias-label-primary)}
-/* Content is inset by the same 32px gutter the shipped Chat view uses
-   (.scroll padding), so the panel lines up with the conversation column.
-   The right side needs much more: the shell's column-width drag handle owns
-   the last 40px of the centre column, and its grab zone covers that whole
-   strip at every y, so any interactive control under it turns the pointer into
-   a resize cursor instead of a click. Measured against the live shell, the
-   plain 32px inset left the row and footer controls' rightmost 7px inside that
-   strip. .wsm-list/.wsm-foot carry the controls, so they and their rows keep a
-   right inset that clears the strip; the bar and notices end in text and stay
-   at 32px. On a narrow column the extra inset simply stops mattering. */
+/* Both column edges carry a resize handle whose grab zone covers the whole
+   ~40px strip it sits on, and both sit ABOVE the view, so any control under a
+   strip turns the pointer into a resize cursor instead of a click. Measured
+   against the live shell at a 1280 window, each handle sits ~116px inside its
+   edge and reaches ~39px inward from there. The handles are anchored to the
+   column's own edges while the column grows with the window, so a FIXED inset
+   stops clearing them as the window widens; the inset therefore scales with
+   the column. The list and footer carry the controls and take the wide inset
+   on both sides; the bar and notices end in text and keep the Chat view's
+   32px gutter so the panel still lines up with the conversation column. */
 .wsm-gutter{padding-left:32px;padding-right:32px}
-.wsm-list.wsm-gutter{padding-right:calc(120px + 12%)}
-.wsm-foot.wsm-gutter{padding-right:calc(120px + 12%)}
+.wsm-list.wsm-gutter{padding-left:calc(120px + 12%);padding-right:calc(120px + 12%)}
+.wsm-foot.wsm-gutter{padding-left:calc(120px + 12%);padding-right:calc(120px + 12%)}
 .wsm-bar{display:flex;align-items:center;gap:8px;padding-top:10px;padding-bottom:10px;flex-wrap:wrap}
 .wsm-count{color:var(--dsw-alias-label-secondary);font-size:12.5px}
 .wsm-spacer{flex:1}
@@ -156,6 +156,15 @@ window.__ModuleLoader__.load({
       }, [])
 
       React.useEffect(() => { void reload() }, [reload])
+
+      // The archive set can move under this panel: another DSH instance sharing
+      // the home directory, or the official sidebar's archive action in this
+      // one. Neither pushes a frame the panel can subscribe to, so poll while
+      // the view is mounted and let the count correct itself.
+      React.useEffect(() => {
+        const handle = setInterval(() => { void reload() }, 4000)
+        return () => { clearInterval(handle) }
+      }, [reload])
 
       const archived = React.useMemo(
         () => new Set(hostIds === null ? (hookIds || []) : hostIds),

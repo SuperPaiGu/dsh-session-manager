@@ -191,10 +191,15 @@ function openArchiveSet(ctx) {
  * surface at its recorded position — the workspace accounting was never
  * touched by archiving, so nothing else has to be repaired.
  *
- * The running `WorkspaceRegistry` keeps its own in-memory copy of the set, so
- * the removal becomes authoritative for grouping at the next process start;
- * until then the official sidebar needs a page reload to pick the session up.
- * That staleness is reported to the caller rather than hidden.
+ * The removal always goes through the storage domain, because that is the only
+ * route to a removal that exists. Archiving (the shipped path) writes to BOTH
+ * the running `WorkspaceRegistry` and the domain, so a running registry that
+ * was booted from the same store holds the same set — but a second `dsh web`
+ * instance sharing the home directory can hold a stale in-memory copy, and a
+ * registry that never saw an id would still have to yield to the durable one.
+ * The domain is therefore the authority here, and the registry is only
+ * consulted to report whether grouping surfaces pick the change up before a
+ * restart.
  *
  * @param ctx - the plugin context.
  * @param id - the session id to restore.
@@ -213,7 +218,17 @@ async function restoreOne(ctx, id) {
       workspaceIds: [...current.workspaceIds],
       archivedSessionIds: current.archivedSessionIds.filter(entry => String(entry) !== id),
     })
-    return { id, status: 'ok', registry: 'stale-until-restart' }
+    // Read back rather than trust the write: a durable store that accepted the
+    // call without dropping the entry would otherwise look like a success and
+    // leave the id pointing at a session that no longer exists.
+    const after = set.global.get()
+    if (after.archivedSessionIds.some(entry => String(entry) === id)) {
+      return { id, status: 'error', message: 'archive entry survived the write' }
+    }
+    const registry = ctx.get('workspaceRegistry')
+    const fresh = registry === undefined
+      || ![...registry.archivedSessionIds].some(entry => String(entry) === id)
+    return { id, status: 'ok', registry: fresh ? 'fresh' : 'stale-until-restart' }
   } catch (error) {
     return { id, status: 'error', message: String(error instanceof Error ? error.message : error).slice(0, 300) }
   }
@@ -344,7 +359,22 @@ export function apply(ctx) {
         const ids = registry === undefined
           ? undefined
           : [...registry.archivedSessionIds].map(String)
-        sendJson(res, 200, { ok: true, source: 'registry', ids })
+        const set = openArchiveSet(ctx)
+        let domainIds
+        if (set.ok) {
+          try {
+            domainIds = [...set.global.get().archivedSessionIds].map(String)
+          } catch (error) {
+            domainIds = ['<read failed: ' + String(error instanceof Error ? error.message : error) + '>']
+          }
+        }
+        sendJson(res, 200, {
+          ok: true,
+          source: 'registry',
+          ids,
+          domainIds,
+          domainReason: set.ok ? null : set.reason,
+        })
       } catch (error) {
         sendJson(res, 500, { ok: false, error: String(error instanceof Error ? error.message : error) })
       }
