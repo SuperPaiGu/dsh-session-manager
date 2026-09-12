@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-manager",
-  "version": "0.3.0",
-  "description": "DSH 会话归档区：对话/轨迹右侧新增「归档」标签，把归档区当回收站——查看已归档会话、恢复回侧栏、批量删除到系统回收站",
+  "version": "0.4.0",
+  "description": "DSH 会话归档区：对话/轨迹右侧新增「归档」标签，查看已归档会话并恢复回侧栏（只做恢复，不做删除）",
   "type": "module",
   "main": "index.js",
   "exports": {

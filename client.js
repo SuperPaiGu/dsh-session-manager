@@ -16,10 +16,12 @@
  * The archived rows are therefore present here and only hidden there, which is
  * exactly the raw material an archive browser needs.
  *
- * Deletion POSTs to the host `/session-manager/delete` endpoint, which sends
- * each session folder to the Windows Recycle Bin. Nothing is archived by this
- * plugin: the registry-global archive set has no removal path in 0.1.5, so
- * appending to it would only manufacture permanent orphans.
+ * This panel is RESTORE-ONLY. It lists the archived sessions that still have
+ * logs on disk and puts a chosen one back into the sidebar by dropping its id
+ * from the archive set. Deletion is deliberately not offered: the official
+ * product owns session lifetime, an archive view is the wrong place to compete
+ * with it, and a delete that mis-reports itself looks to the user exactly like
+ * a restore.
  *
  * Loaded by the client module system as /plugins/dsh-session-manager/client.js.
  */
@@ -50,7 +52,6 @@ window.__ModuleLoader__.load({
 .wsm-btn{background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);padding:4px 10px;border-radius:7px;font-size:12.5px;cursor:pointer}
 .wsm-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-3)}
 .wsm-btn:disabled{opacity:.6;cursor:default}
-.wsm-btn.danger{background:none;border-color:var(--dsw-alias-border-l1);color:var(--dsw-alias-label-error,#e5534b)}
 .wsm-list{flex:1;min-height:0;overflow:auto;padding-top:4px;padding-bottom:12px}
 .wsm-row{display:flex;align-items:flex-start;gap:9px;padding:7px 8px;border-radius:8px}
 .wsm-row:hover{background:var(--dsw-alias-bg-layer-2)}
@@ -62,16 +63,10 @@ window.__ModuleLoader__.load({
 .wsm-rowbtn{background:none;border:none;color:var(--dsw-alias-label-secondary);padding:3px 6px;border-radius:6px;cursor:pointer;font-size:12px;flex:none}
 .wsm-rowbtn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary)}
 .wsm-rowbtn:disabled{opacity:.55;cursor:default}
-.wsm-rowbtn.danger{color:var(--dsw-alias-label-error,#e5534b)}
 .wsm-empty{padding:28px 0;text-align:center;color:var(--dsw-alias-label-secondary);white-space:pre-line}
 .wsm-foot{display:flex;align-items:center;gap:8px;padding-top:9px;padding-bottom:9px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
 .wsm-err{color:var(--dsw-alias-label-error,#e5534b);font-size:12px;padding-top:6px;padding-bottom:6px}
 .wsm-note{color:var(--dsw-alias-label-secondary);font-size:12px;background:var(--dsw-alias-bg-layer-2);padding-top:6px;padding-bottom:6px}
-.wsm-overlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}
-.wsm-modal{width:min(440px,92vw);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px}
-.wsm-modal-title{font-size:14px;font-weight:600;margin-bottom:10px}
-.wsm-modal-body{font-size:12.5px;line-height:1.65;color:var(--dsw-alias-label-secondary);white-space:pre-wrap}
-.wsm-modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 `
 
     /** Read the authoritative archive set from the host. */
@@ -107,29 +102,20 @@ window.__ModuleLoader__.load({
       return new Date(ts).toLocaleDateString()
     }
 
-    /** Shared confirmation modal. */
-    function ConfirmDialog({ title, body, busy, onCancel, onConfirm, confirmLabel }) {
-      return React.createElement('div', { className: 'wsm-overlay', onClick: busy ? undefined : onCancel },
-        React.createElement('div', { className: 'wsm-modal', onClick: (e) => e.stopPropagation() },
-          React.createElement('div', { className: 'wsm-modal-title' }, title),
-          React.createElement('div', { className: 'wsm-modal-body' }, body),
-          React.createElement('div', { className: 'wsm-modal-foot' },
-            React.createElement('button', { type: 'button', className: 'wsm-btn', disabled: busy, onClick: onCancel }, '取消'),
-            React.createElement('button', { type: 'button', className: 'wsm-btn danger', disabled: busy, onClick: onConfirm }, busy ? '处理中…' : confirmLabel),
-          ),
-        ),
-      )
-    }
-
     /**
-     * The 「归档」 panel — the archive set is the recycle bin, so this lists
-     * ONLY archived sessions. Hook calls stay unconditional at the top; the
-     * session array is derived with useMemo over the two framework hooks.
+     * The 「归档」 panel. This build is restore-only by decision: it lists ONLY
+     * archived sessions and its one action is putting a session back into the
+     * sidebar. Deletion is deliberately absent — the official product owns
+     * session lifetime, and an archive view is the wrong place to compete with
+     * it.
      *
-     * `removed` carries ids this panel has already acted on (restored or
-     * deleted). The archive set a client holds arrives with the connection
-     * snapshot and is not re-read afterwards, so without it a restored row
-     * would reappear here until the page reloads.
+     * Hook calls stay unconditional at the top; the session array is derived
+     * with useMemo over the framework hooks.
+     *
+     * `removed` carries ids this panel has already restored. The archive set a
+     * client holds arrives with the connection snapshot and is not re-read
+     * afterwards, so without it a restored row would reappear here until the
+     * page reloads.
      */
     function ArchivePanel(props) {
       const list = props.useSessions((s) => s)
@@ -137,7 +123,6 @@ window.__ModuleLoader__.load({
       const [hostIds, setHostIds] = React.useState(null)
       const [selected, setSelected] = React.useState(() => new Set())
       const [removed, setRemoved] = React.useState(() => new Set())
-      const [confirm, setConfirm] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(null)
       const [notice, setNotice] = React.useState(null)
@@ -203,8 +188,8 @@ window.__ModuleLoader__.load({
        * Host did nothing (running session, nothing on disk), and reporting it
        * as a failure would be as wrong as silently dropping the row.
        */
-      const settle = (results, label, refresh) => {
-        const done = results.filter((r) => r.status === 'ok' || r.status === 'deleted').map((r) => r.id)
+      const settle = (results, label) => {
+        const done = results.filter((r) => r.status === 'ok').map((r) => r.id)
         const failed = results.filter((r) => r.status === 'error')
         const skipped = results.filter((r) => r.status === 'skipped')
         setRemoved((prev) => {
@@ -213,8 +198,6 @@ window.__ModuleLoader__.load({
           return next
         })
         setSelected(new Set())
-        setConfirm(null)
-        if (typeof refresh === 'function') refresh()
         if (failed.length > 0) {
           setError(failed.length + ' 个会话' + label + '失败：'
             + failed.map((r) => r.message || r.reason || r.status).join('；').slice(0, 400))
@@ -222,26 +205,8 @@ window.__ModuleLoader__.load({
         if (skipped.length > 0) {
           const reasons = [...new Set(skipped.map((r) => r.reason || 'skipped'))]
           setNotice(skipped.length + ' 个会话未' + label + '：' + reasons.map((reason) => (
-            reason === 'running' ? '正在运行'
-              : reason === 'no-artifact' ? '磁盘上没有它的文件夹（它保持在归档区，未做改动）'
-                : reason === 'missing' ? '已不在会话记录里'
-                  : reason === 'not-archived' ? '本来就不在归档区'
-                    : reason
+            reason === 'not-archived' ? '本来就不在归档区' : reason
           )).join('；'))
-        }
-      }
-
-      const runDelete = async (ids) => {
-        setBusy(true)
-        setError(null)
-        setNotice(null)
-        try {
-          settle(await apiCall('/session-manager/delete', ids), '删除', props.onChanged)
-          await reload()
-        } catch (reason) {
-          setError(String((reason && reason.message) || reason))
-        } finally {
-          setBusy(false)
         }
       }
 
@@ -266,8 +231,7 @@ window.__ModuleLoader__.load({
         React.createElement('input', {
           type: 'checkbox',
           checked: selected.has(s.id),
-          disabled: s.running,
-          title: s.running ? '正在运行，无法删除' : '选择',
+          title: '选择',
           onChange: () => toggle(s.id),
         }),
         React.createElement('div', { className: 'wsm-main' },
@@ -285,13 +249,6 @@ window.__ModuleLoader__.load({
           title: '恢复到侧栏（取消归档）',
           onClick: () => { void runRestore([s.id]) },
         }, '恢复'),
-        React.createElement('button', {
-          type: 'button',
-          className: 'wsm-rowbtn danger',
-          disabled: s.running || busy,
-          title: s.running ? '正在运行，无法删除' : '删除该会话（进系统回收站）',
-          onClick: () => setConfirm({ kind: 'one', ids: [s.id], title: s.title || s.id }),
-        }, '删除'),
       ))
 
       return React.createElement('div', { className: 'wsm-panel' },
@@ -312,7 +269,7 @@ window.__ModuleLoader__.load({
           : React.createElement('div', { className: 'wsm-list wsm-gutter' }, list2),
         React.createElement('div', { className: 'wsm-foot wsm-gutter' },
           React.createElement('span', { className: 'wsm-count' },
-            selected.size > 0 ? '已选 ' + selected.size + ' 个' : '勾选后可批量恢复或删除'),
+            selected.size > 0 ? '已选 ' + selected.size + ' 个' : '勾选后可批量恢复到侧栏'),
           React.createElement('span', { className: 'wsm-spacer' }),
           React.createElement('button', {
             type: 'button',
@@ -320,24 +277,7 @@ window.__ModuleLoader__.load({
             disabled: selected.size === 0 || busy,
             onClick: () => { void runRestore([...selected]) },
           }, '恢复选中'),
-          React.createElement('button', {
-            type: 'button',
-            className: 'wsm-btn danger',
-            disabled: selected.size === 0 || busy,
-            onClick: () => setConfirm({ kind: 'batch', ids: [...selected], title: null }),
-          }, '删除选中'),
         ),
-        confirm !== null && React.createElement(ConfirmDialog, {
-          title: confirm.kind === 'batch' ? '批量删除会话' : '删除会话',
-          body: (confirm.kind === 'batch'
-            ? '确定要删除选中的 ' + confirm.ids.length + ' 个会话吗？'
-            : '确定要删除会话“' + confirm.title + '”吗？')
-            + '\n\n它们的日志文件夹会被移入系统回收站，可以从回收站恢复。',
-          busy,
-          onCancel: () => { if (!busy) setConfirm(null) },
-          onConfirm: () => { void runDelete(confirm.ids) },
-          confirmLabel: '确定删除',
-        }),
       )
     }
 
@@ -355,12 +295,9 @@ window.__ModuleLoader__.load({
         document.head.append(style)
         ctx.effect(() => () => style.remove(), 'session-manager: styles')
 
-        // Deleted sessions were cold by definition (a running one is skipped),
-        // so the Host list re-read from disk drops them right away.
-        const ArchiveEntry = (props) => React.createElement(ArchiveView, {
-          ...props,
-          onDeleted: () => { void ctx.sessions.refresh() },
-        })
+        // The panel reads its data through the framework hooks and reloads the
+        // archive set itself, so the entry needs no extra wiring.
+        const ArchiveEntry = (props) => React.createElement(ArchiveView, props)
 
         // `conversation.view` is declared by the conversation shell, which may
         // activate after this row. A bare register would run against an
