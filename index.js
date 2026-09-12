@@ -1,37 +1,115 @@
 /**
- * dsh-session-manager host plugin: physically delete DSH sessions into the
- * system Recycle Bin. The Web sidebar (client.js) posts session ids to the
- * `/session-manager/delete` endpoint; this half resolves each session's on-disk
- * directory through `sessionPersistence.locate`, guards the path, and recycles
- * it with `Microsoft.VisualBasic.FileIO` (SendToRecycleBin) — never an
- * irreversible rm. Running sessions are skipped.
+ * dsh-session-manager host plugin (v0.3.0).
  *
- * After a successful recycle the session id is also added to the official
- * registry-global archive set (`workspaceRegistry.archiveSession`). That is the
- * official mechanism grouping surfaces use to hide a session: the Web client
- * receives the `host/archived-sessions-changed` frame and removes the row from
- * the sidebar immediately (persisted), without waiting for the memory-attached
- * session's lifecycle to end. Archiving never touches logs or workspace
- * accounting; a session no longer known to persistence may reject the archive,
- * which is non-fatal — the client list refresh already drops cold rows.
+ * Serves the 「归档」 Conversation View panel (client.js) and performs the only
+ * operation that needs the Host: sending a Session's on-disk folder to the
+ * Windows Recycle Bin.
+ *
+ * Locating the folder — the 0.1.5 break.
+ * `SessionPersistence.locate(header) → { path }` no longer exists: the abstract
+ * service is now `create/open/flush/stat/list`, and `SessionPersistenceSnapshot`
+ * carries only `header`, `revision`, optional `eventCount` and `sizeBytes` — no
+ * path. The location is still fully determined by public values, so this plugin
+ * derives it instead of asking for it:
+ *
+ *   <root>/<projectKey(header.cwd)>/<encodeSegment(header.id)>/
+ *
+ * `root` is the jsonl backend's own public `config.root` (the composition sets
+ * it to `dshHomePath('sessions')`), and the two segment encodings are the
+ * documented, injective schemes that backend uses. Deriving the DIRECTORY — not
+ * a versioned filename — keeps this working across Session format generations
+ * (v3 today, v4 later) and across compression changes, because whatever
+ * `session.vN.jsonl[.zstd]` lives inside travels with the folder.
+ *
+ * Deletion never calls `workspaceRegistry.archiveSession`. That earlier
+ * workaround appended an id to the registry-global archive set, which has no
+ * removal path in 0.1.5 — the id would outlive the deleted log forever as an
+ * orphan. Deleting only the folder leaves no new residue.
+ *
+ * Running sessions are skipped: their log is held under a write lease, and
+ * yanking it out from under the writer is never what the user meant.
  */
 
-export const name = 'session-manager'
-export const inject = ['webServer', 'sessionPersistence', 'shell', 'agents']
+import { readdir, stat } from 'node:fs/promises'
+import { join, resolve, sep } from 'node:path'
 
-/** Safe dirname of an absolute path (both separators). */
-function dirnameOf(p) {
-  if (typeof p !== 'string') return p
-  const i = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'))
-  return i === -1 ? p : p.slice(0, i)
+export const name = 'session-manager'
+export const inject = ['webServer', 'sessionPersistence', 'shell']
+
+/** Project-directory key, mirroring the shipped JSONL backend's `projectKey`. */
+export function projectKey(cwd) {
+  if (typeof cwd !== 'string' || cwd.length === 0) throw new Error('session header carries no cwd')
+  let readable = ''
+  let separatorRun = false
+  for (let i = 0; i < cwd.length; i++) {
+    const code = cwd.charCodeAt(i)
+    const ch = String.fromCharCode(code)
+    if (ch === '/' || ch === '\\' || ch === ':') {
+      if (!separatorRun) readable += '-'
+      separatorRun = true
+    } else if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
+      readable += ch
+      separatorRun = false
+    } else {
+      readable += '~' + code.toString(16).toUpperCase().padStart(4, '0')
+      separatorRun = false
+    }
+  }
+  const slug = readable.replace(/^-+/, '') || 'root'
+  return '--' + slug.slice(0, 251) + '--'
 }
 
-/** Send one directory to the Windows Recycle Bin; failures carry a message. */
+/** One safe path segment, mirroring the shipped JSONL backend's `encodeSegment`. */
+export function encodeSegment(raw) {
+  if (typeof raw !== 'string' || raw.length === 0) throw new Error('cannot encode an empty path segment')
+  if (raw === '.') return '~002E'
+  if (raw === '..') return '~002E~002E'
+  let out = ''
+  for (let i = 0; i < raw.length; i++) {
+    const code = raw.charCodeAt(i)
+    const ch = String.fromCharCode(code)
+    if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) out += ch
+    else out += '~' + code.toString(16).toUpperCase().padStart(4, '0')
+  }
+  return out
+}
+
+/**
+ * Resolve one stored session's folder, refusing anything that escapes the root.
+ * @param root - configured sessions root.
+ * @param header - the stored session header.
+ * @returns the absolute folder path.
+ */
+export function sessionDirOf(root, header) {
+  const dir = resolve(join(root, projectKey(header.cwd), encodeSegment(String(header.id))))
+  const prefix = resolve(root) + sep
+  if (!dir.startsWith(prefix)) throw new Error('derived path escapes the sessions root')
+  return dir
+}
+
+/** Whether the folder exists and is a directory (every other errno must surface). */
+async function directoryExists(dir) {
+  try {
+    return (await stat(dir)).isDirectory()
+  } catch (error) {
+    if (error !== null && typeof error === 'object' && error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+/**
+ * Send one existing folder to the Windows Recycle Bin. Mirrors the shipped
+ * recycle helper: `resolve` applies the implementation's own defaults, and the
+ * policy is requested because session storage lives outside any workspace.
+ * @param shell - the shell service, when available.
+ * @param dir - absolute folder to recycle; must already exist.
+ * @returns `{ ok }` plus a diagnostic message on failure.
+ */
 async function recycle(shell, dir) {
   if (shell === undefined) return { ok: false, message: 'shell service unavailable' }
-  const esc = (s) => String(s).replace(/'/g, "''")
+  const esc = (value) => String(value).replace(/'/g, "''")
   const script =
-    "Add-Type -AssemblyName Microsoft.VisualBasic; " +
+    'Add-Type -AssemblyName Microsoft.VisualBasic; ' +
     "if (Test-Path -LiteralPath '" + esc(dir) + "') { " +
     "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory('" + esc(dir) + "','OnlyErrorDialogs','SendToRecycleBin') }"
   const base = {
@@ -41,50 +119,18 @@ async function recycle(shell, dir) {
   let spec
   try {
     spec = shell.resolve({ ...base, sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: 'C:\\' } })
-  } catch (error) {
+  } catch {
     spec = shell.resolve(base)
   }
   const result = await shell.run(spec)
   if (result.exitCode !== 0) {
-    const stderr = result.stderr && result.stderr.text ? result.stderr.text : ''
-    return { ok: false, message: 'recycle-bin delete failed (exit ' + result.exitCode + '): ' + stderr.trim().slice(0, 300) }
+    const stderr = result.stderr !== undefined && typeof result.stderr.text === 'string' ? result.stderr.text : ''
+    return { ok: false, message: 'recycle-bin delete failed (exit ' + String(result.exitCode) + '): ' + stderr.trim().slice(0, 300) }
   }
   return { ok: true }
 }
 
-/** Delete one persisted session; skip when running / missing / no artifact. */
-async function deleteOne(sessionId, headersByString, deps) {
-  const { agents, persistence, shell } = deps
-  // 「正在运行」= 有 live agent 且该 agent 状态为 running。
-  // Web 环境下已打开的会话通常常驻 live agent（idle），所以不能只看 agent 是否存在。
-  const agent = agents !== undefined ? agents.get(sessionId) : undefined
-  if (agent !== undefined && agent.status === 'running') {
-    return { id: sessionId, status: 'skipped', reason: 'running' }
-  }
-  const header = headersByString.get(sessionId)
-  if (header === undefined) return { id: sessionId, status: 'skipped', reason: 'missing' }
-  if (persistence === undefined) return { id: sessionId, status: 'error', message: 'session persistence unavailable' }
-  const loc = persistence.locate(header)
-  if (loc === undefined) return { id: sessionId, status: 'skipped', reason: 'no-artifact' }
-  const dir = dirnameOf(loc.path)
-  if (!dir || !String(loc.path).includes('sessions')) {
-    return { id: sessionId, status: 'error', message: 'refusing suspicious path: ' + String(loc.path) }
-  }
-  const outcome = await recycle(shell, dir)
-  if (!outcome.ok) return { id: sessionId, status: 'error', message: outcome.message }
-  // 删除成功后把 id 加入官方归档集合：侧栏（分组/平铺/搜索）立即隐藏该行。
-  // 失败不致命（冷会话可能已不在 persistence 里），客户端 refresh 会兜底。
-  if (deps.workspaceRegistry !== undefined) {
-    try {
-      await deps.workspaceRegistry.archiveSession(sessionId)
-    } catch {
-      // 非致命：冷会话可能已不在 persistence 中，客户端 refresh 会兜底。
-    }
-  }
-  return { id: sessionId, status: 'deleted' }
-}
-
-/** JSON-response helper (mirrors dsh-mcp-panel). */
+/** JSON-response helper. */
 function sendJson(res, status, body) {
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -93,54 +139,215 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body))
 }
 
-/** Read a small JSON request body. */
+/** Read a small JSON request body; malformed input becomes `{}`. */
 async function readJsonBody(req) {
   let raw = ''
   for await (const chunk of req) raw += chunk
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : {}
+    return parsed !== null && typeof parsed === 'object' ? parsed : {}
   } catch {
     return {}
   }
 }
 
-/** The host plugin body. */
-export function apply(ctx) {
-  const deps = {
-    agents: ctx.get('agents'),
-    persistence: ctx.get('sessionPersistence'),
-    shell: ctx.get('shell'),
-    workspaceRegistry: ctx.get('workspaceRegistry'),
+/**
+ * Open the registry-global archive set through the storage domain.
+ *
+ * `archivedSessionIds` is a durable display filter owned by the workspace
+ * plugin, and 0.1.5 exposes exactly one operation on it — `archiveSession`,
+ * which only appends. The workspace README states the omission outright
+ * ("Archiving is one-way ... no unarchive action exists yet"), so the storage
+ * domain is the only route to the removal an unarchive needs.
+ *
+ * `storage.domain` is documented as a diagnostic surface, which is why every
+ * caller here treats it as best-effort: an unavailable or incompatible domain
+ * degrades to a reported status and never throws into the request.
+ *
+ * @param ctx - the plugin context.
+ * @returns the open global handle, or a reason it is unusable.
+ */
+function openArchiveSet(ctx) {
+  const storage = ctx.get('storage')
+  const facility = storage === undefined ? undefined : storage.domain
+  if (facility === undefined || typeof facility.get !== 'function') {
+    return { ok: false, reason: 'archive-set-unavailable' }
+  }
+  let domain
+  try {
+    domain = facility.get('workspace')
+  } catch {
+    return { ok: false, reason: 'archive-set-unavailable' }
+  }
+  if (domain === undefined || domain.global === undefined) {
+    return { ok: false, reason: 'archive-set-unavailable' }
+  }
+  return { ok: true, global: domain.global }
+}
+
+/**
+ * Remove one id from the archive set, restoring the session to every grouping
+ * surface at its recorded position — the workspace accounting was never
+ * touched by archiving, so nothing else has to be repaired.
+ *
+ * The running `WorkspaceRegistry` keeps its own in-memory copy of the set, so
+ * the removal becomes authoritative for grouping at the next process start;
+ * until then the official sidebar needs a page reload to pick the session up.
+ * That staleness is reported to the caller rather than hidden.
+ *
+ * @param ctx - the plugin context.
+ * @param id - the session id to restore.
+ * @returns one result row for the response.
+ */
+async function restoreOne(ctx, id) {
+  const set = openArchiveSet(ctx)
+  if (!set.ok) return { id, status: 'error', message: set.reason }
+  try {
+    const current = set.global.get()
+    if (!current.archivedSessionIds.some(entry => String(entry) === id)) {
+      return { id, status: 'skipped', reason: 'not-archived' }
+    }
+    await set.global.set({
+      initialized: current.initialized,
+      workspaceIds: [...current.workspaceIds],
+      archivedSessionIds: current.archivedSessionIds.filter(entry => String(entry) !== id),
+    })
+    return { id, status: 'ok', registry: 'stale-until-restart' }
+  } catch (error) {
+    return { id, status: 'error', message: String(error instanceof Error ? error.message : error).slice(0, 300) }
+  }
+}
+
+/**
+ * Drop one id from the archive set after its log was deleted.
+ *
+ * Deleting a session's log would otherwise leave its id in `archivedSessionIds`
+ * forever — the orphan this plugin stopped manufacturing, and the reason a
+ * machine can accumulate hundreds of entries naming sessions that no longer
+ * exist (253 on the one this was developed on).
+ *
+ * @param ctx - the plugin context.
+ * @param id - the session id to remove.
+ * @returns a short status note for the response row.
+ */
+async function forgetArchived(ctx, id) {
+  const result = await restoreOne(ctx, id)
+  if (result.status === 'ok') return 'archive-entry-cleared'
+  if (result.status === 'skipped') return 'not-archived'
+  return result.message === undefined ? 'archive-clear-failed' : 'archive-clear-failed: ' + result.message
+}
+
+/**
+ * Delete one stored session's folder.
+ * @param id - the session id from the request.
+ * @param deps - resolved services.
+ * @returns one per-session result row.
+ */
+async function deleteOne(id, deps) {
+  const { agents, persistence, shell, root, ctx } = deps
+  if (persistence === undefined) return { id, status: 'error', message: 'session persistence unavailable' }
+
+  const agent = agents === undefined ? undefined : agents.get(id)
+  if (agent !== undefined && agent.status === 'running') return { id, status: 'skipped', reason: 'running' }
+
+  let header
+  try {
+    const snapshot = await persistence.stat(id)
+    if (snapshot === undefined) return { id, status: 'skipped', reason: 'missing' }
+    header = snapshot.header
+  } catch (error) {
+    return { id, status: 'error', message: String(error instanceof Error ? error.message : error).slice(0, 300) }
   }
 
+  let dir
+  try {
+    dir = sessionDirOf(root, header)
+  } catch (error) {
+    return { id, status: 'error', message: String(error instanceof Error ? error.message : error) }
+  }
+
+  if (!(await directoryExists(dir))) {
+    // A session can be known to persistence with no materialized artifact yet.
+    return { id, status: 'skipped', reason: 'no-artifact' }
+  }
+
+  const outcome = await recycle(shell, dir)
+  if (!outcome.ok) return { id, status: 'error', message: outcome.message }
+  return { id, status: 'deleted', archive: await forgetArchived(ctx, id) }
+}
+
+/** Read the requested id batch, or answer 400 and return null. */
+function readIds(body, res) {
+  const ids = Array.isArray(body.ids) ? body.ids.map(String).filter(Boolean) : []
+  if (ids.length === 0) {
+    sendJson(res, 400, { ok: false, error: 'no session ids supplied' })
+    return null
+  }
+  return ids
+}
+
+/**
+ * Register one batch endpoint. Both operations share request parsing and
+ * response shape; only the per-session work differs.
+ * @param ctx - the plugin context.
+ * @param path - exact route path.
+ * @param label - diagnostic label for failures.
+ * @param run - per-session operation returning one result row.
+ */
+function registerBatch(ctx, path, label, run) {
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
-    path: '/session-manager/delete',
+    path,
     handler: async (req, res) => {
       try {
         const body = await readJsonBody(req)
-        const ids = Array.isArray(body.ids) ? body.ids.map(String).filter(Boolean) : []
-        if (ids.length === 0) {
-          sendJson(res, 200, { ok: true, results: [] })
-          return
-        }
-        let headers = []
-        if (deps.persistence !== undefined) {
-          try { headers = await deps.persistence.list() } catch (error) { headers = [] }
-        }
-        const byId = new Map()
-        for (const h of headers) byId.set(String(h.id), h)
+        const ids = readIds(body, res)
+        if (ids === null) return
         const results = []
-        for (const id of ids) {
-          try { results.push(await deleteOne(id, byId, deps)) }
-          catch (error) { results.push({ id, status: 'error', message: error instanceof Error ? error.message : String(error) }) }
-        }
+        for (const id of ids) results.push(await run(id, body))
         sendJson(res, 200, { ok: true, results })
       } catch (error) {
-        sendJson(res, 200, { ok: false, error: String(error?.message || error) })
+        ctx.logger.warn(`session-manager ${label} failed: ` + String(error))
+        sendJson(res, 500, { ok: false, error: String(error instanceof Error ? error.message : error) })
       }
     },
-  }), 'session-manager: delete route')
+  }), `session-manager: ${label} endpoint`)
+}
+
+/** The host plugin body. */
+export function apply(ctx) {
+  registerBatch(ctx, '/session-manager/delete', 'delete', async (id) => {
+    const persistence = ctx.get('sessionPersistence')
+    const config = persistence === undefined ? undefined : persistence.config
+    const root = config !== undefined && typeof config.root === 'string' ? config.root : undefined
+    if (persistence === undefined || root === undefined) {
+      return { id, status: 'error', message: 'session persistence exposes no configured root' }
+    }
+    return deleteOne(id, {
+      agents: ctx.get('agents'),
+      persistence,
+      shell: ctx.get('shell'),
+      root,
+      ctx,
+    })
+  })
+
+  registerBatch(ctx, '/session-manager/restore', 'restore', id => restoreOne(ctx, id))
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/session-manager/archived',
+    handler: (req, res) => {
+      try {
+        const registry = ctx.get('workspaceRegistry')
+        const ids = registry === undefined
+          ? undefined
+          : [...registry.archivedSessionIds].map(String)
+        sendJson(res, 200, { ok: true, source: 'registry', ids })
+      } catch (error) {
+        sendJson(res, 500, { ok: false, error: String(error instanceof Error ? error.message : error) })
+      }
+    },
+  }), 'session-manager: archived endpoint')
 }
